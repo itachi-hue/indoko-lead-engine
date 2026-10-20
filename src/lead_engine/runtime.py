@@ -48,6 +48,7 @@ class Run:
         self.ok = self.failed = self.skipped = 0
         self.cost_usd = 0.0
         self.notes: list[str] = []
+        self.exit_code = 0  # non-zero marks the run 'failed' so it never counts as a success
 
     def __enter__(self):
         self.con.execute("INSERT INTO runs(run_id,command,started_at,status) VALUES(?,?,?, 'running')",
@@ -56,7 +57,7 @@ class Run:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        status = "error" if exc else "ok"
+        status = "error" if exc else ("failed" if self.exit_code else "ok")
         error = f"{exc_type.__name__}: {exc}" if exc else ("; ".join(self.notes) or None)
         self.con.execute("UPDATE runs SET finished_at=?, ok=?, failed=?, skipped=?, cost_usd=?, "
                          "status=?, error=? WHERE run_id=?",

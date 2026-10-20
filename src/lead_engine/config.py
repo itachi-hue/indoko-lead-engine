@@ -72,7 +72,7 @@ DEFAULTS: dict = {
         "linkedin_tab": "LinkedIn",
     },
     "drive": {
-        "warm_file_ids": [],
+        "warm_files": [],          # [{id, label, consent_confirmed, assume_us}]
         "backup_folder_id": "",
     },
     "retention": {

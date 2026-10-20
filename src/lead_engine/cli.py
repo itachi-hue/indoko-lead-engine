@@ -123,13 +123,17 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
     ctx.dry_run = ctx.dry_run or args.dry_run
     setup_logging(ctx.settings.data_dir, args.verbose)
     spec = COMMANDS[args.command]
+    def execute() -> int:
+        with Run(ctx.con, args.command) as run:
+            code = spec["fn"](ctx, args, run)
+            run.exit_code = code or 0
+            return code or 0
+
     try:
         if spec["lock"]:
             with run_lock(ctx.settings.lock_path):
-                with Run(ctx.con, args.command) as run:
-                    return spec["fn"](ctx, args, run)
-        with Run(ctx.con, args.command) as run:
-            return spec["fn"](ctx, args, run)
+                return execute()
+        return execute()
     except AlreadyRunning as exc:
         print(f"already running: {exc}", file=sys.stderr)
         return 0

@@ -13,8 +13,10 @@ REVIEW_COLUMNS = [
 DECISIONS = ["Approve", "Edit", "Reject"]
 
 CRM_PIPELINE_COLUMNS = ["person_id", "Name", "Group", "Warm or cold", "Email", "Status",
-                        "First sent", "Last event", "Positive reply date", "Reply reason"]
-CRM_TEAM_COLUMNS = ["Booked", "Attended", "One-pager sent", "Client", "Owner", "Notes"]
+                        "First sent", "Last event", "Positive reply date", "Flag"]
+CRM_TEAM_COLUMNS = ["Reply reason", "Booked", "Attended", "One-pager sent", "Client", "Owner", "Notes"]
+REPLY_REASONS = ["wrong person", "not relevant", "timing", "already working with someone", "price",
+                 "interested"]
 CRM_COLUMNS = CRM_PIPELINE_COLUMNS + CRM_TEAM_COLUMNS
 
 SUPPRESSION_COLUMNS = ["Email or domain", "Reason", "Added by", "Date"]

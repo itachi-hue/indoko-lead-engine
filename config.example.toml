@@ -57,8 +57,15 @@ metrics_tab = "Metrics"
 linkedin_tab = "LinkedIn"
 
 [drive]
-warm_file_ids = []              # Drive IDs of the warm-list Excel files
 backup_folder_id = ""           # a folder in a Shared Drive
+
+# One block per warm-list Excel file on Drive. Files without consent_confirmed = true are skipped.
+# assume_us = true treats rows with no location as US-based (only if Karishma confirms the list is US).
+[[drive.warm_files]]
+id = ""
+label = "platform-signups"
+consent_confirmed = false
+assume_us = false
 
 [retention]
 uncontacted_days = 90
