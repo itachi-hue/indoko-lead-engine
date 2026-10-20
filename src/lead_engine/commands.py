@@ -255,3 +255,25 @@ def cmd_score(ctx, args, run):
         ready[seg] = sum(1 for r in rows if scoring.evidence_ok(ctx.con, r["person_id"]))
     print(json.dumps({"scored": counts, "us_with_2plus_dated_evidence": ready}, indent=2))
     return 0
+
+
+# ---------------- email finding ----------------
+@command("find-emails", "Find and verify one usable email per person, within a dollar budget")
+def cmd_find_emails(ctx, args, run):
+    from .emails.find import candidates_for, find_emails
+
+    limit = args.limit or int(ctx.settings.get("pilot.per_group_limit", 100))
+    budget = args.budget if args.budget is not None else float(ctx.settings.get("emails.budget_usd_per_run", 10))
+    if ctx.dry_run:
+        n = len(candidates_for(ctx.con, args.group, limit))
+        print(f"[dry-run] {n} '{args.group}' people need an email; budget ${budget:.2f}; no lookups made")
+        return 0
+    print(json.dumps(find_emails(ctx, run, args.group, limit, budget)))
+    return 0
+
+
+@configure("find-emails")
+def _(p):
+    p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
+    p.add_argument("--limit", type=int)
+    p.add_argument("--budget", type=float, help="dollars for this run (default from config)")
