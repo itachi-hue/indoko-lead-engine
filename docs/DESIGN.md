@@ -531,6 +531,7 @@ The dates assume about half of Vivek's time.
 | M4 · Writing | Nov 9–Nov 20 | Gemini drafter, checks, follow-ups, LinkedIn list for engineers | Each check catches every banned item in the 40-draft test set, with at most 10% false alarms; Karishma approves at least 70% of 50 sample drafts without edits |
 | M5 · Pilot | Nov 23–Dec 18 | Staged sending to 400 cold contacts plus the warm waves; daily runs; weekly metrics | Under 3% bounces on the first 100 sends; four weeks of metrics by group |
 | M6 · Hosting | January 2027 | Postgres, scheduled runs on the chosen host | Runs without Vivek's laptop |
+| M7 · Evaluation | Built alongside M2–M4; review at pilot week 4 and again at week 8 | `lead-engine eval` commands, labelled sets, invariant audit, funnel report, pilot decision rules (section 18) | Every component target in section 18 measured; a scale, fix or stop decision recorded for each group |
 
 M1 ships first, so the warm campaign starts while the cold pipeline is being built.
 
@@ -587,3 +588,75 @@ M1 ships first, so the warm campaign starts while the cold pipeline is being bui
 - The sender name, the Indoko postal address for the footer, and the booking link.
 - Who reviews drafts in the Sheet, and how often.
 - Where the warm list came from, so only confirmed contacts are imported.
+
+---
+
+## 18. Evaluation
+
+Evaluation happens in four layers. Each layer catches problems the one above can't, and the first two run before any real email is sent.
+
+### 18.1 Component checks (offline, before sending)
+
+Each stage is checked against a hand-labelled sample. The `lead-engine eval <stage>` commands do the work:
+
+- They draw a random sample and write a labelling sheet.
+- Once the labels are filled in, they compute the metric.
+
+Labelled sets live in `eval/data/`. That folder is git-ignored, because the sets contain personal data. Only the scripts and the label schemas are committed.
+
+| Stage | Measures | Method | Target |
+|---|---|---|---|
+| Sourcing | Person is in the target group (seniority, achievements, US) | Label 25 random people per group as fit or not fit | ≥80% fit |
+| De-duplication | Duplicates and wrong merges | Review 50 people sampled across sources | <2% duplicates, 0 wrong merges |
+| Evidence | Fact is true and about this person | Open the source for 50 sampled `signals` | ≥95% correct |
+| Scoring | A higher score means a stronger candidate | Compare 30 pairs by hand against the score order | ≥70% agreement. Later, recalibrate against bookings |
+| Email finding | Find rate, and whether the email belongs to the right person | Find rate per group; check 30 found addresses against their source page | Wrong-person ≤2% |
+| Draft checks | Checks catch bad drafts without false alarms | The 40 labelled drafts | Catch every banned item; ≤10% false alarms |
+| Draft quality | Karishma would send it as is | 50 sample drafts scored 1–5 for relevance, specificity and tone, plus approve or edit | ≥70% approved unedited; average ≥4 |
+
+### 18.2 System invariants (checked automatically on every run)
+
+These are pass-or-fail rules. `lead-engine eval invariants` runs them as SQL checks, and so does every `send`. A single violation stops sending.
+
+- No send to anyone on the suppression list, by email, domain or hash.
+- At most one send per draft, and at most one active draft per person.
+- No engineer emailed at an employer or corporate domain.
+- No send unless `events` succeeded within the last 26 hours.
+- No send without an `approved` or `edited` decision.
+
+### 18.3 Funnel (live, in the Metrics tab)
+
+The funnel is reported by group, by warm or cold, and by email angle:
+
+```
+delivered → replied → positive reply → booked → attended → client
+```
+
+- **Opens are not used as a metric,** because mail privacy features make them unreliable.
+- **Cost per booked call and per client** come from spend recorded in `runs`, plus monthly tool fees prorated.
+- **Attribution:** each group has its own Cal.com booking link, or a tagged one. A booking counts as coming from the pipeline even if the person books with a different email.
+- **Every reply gets a reason tag:**
+  - wrong person
+  - not relevant
+  - timing
+  - already working with someone
+  - price
+  - interested
+
+  The Review tab or the CRM tab has a column for the tag, and `report` summarizes the tags by group.
+
+### 18.4 Pilot review and decisions
+
+Reviews happen at pilot week 4, and again at week 8 or later because clients close late.
+
+**Sample size.** With about 100 sends per group, the report shows each rate with a 95% Wilson interval. For example, 3 positive replies out of 100 has a range of about 1% to 8.5%. The pilot can find large differences between groups. It can't fine-tune subject lines.
+
+**Decision rules,** agreed with Karishma before the pilot starts:
+
+| Result after ~100 sends in a group | Decision |
+|---|---|
+| Positive replies ≥3%, bookings ≥1% and bounces <3% | Scale up |
+| Positive replies from 1% to 3% | Fix the targeting or the email, then retest |
+| Positive replies <1%, or bounces ≥3% | Stop the group, or fix its email source first |
+
+**The final check:** compare cost per client with Indoko's current channels (LinkedIn, referrals, events).
