@@ -1,0 +1,69 @@
+# Copy to config.toml and fill in. Secrets (API keys) go in .env, never here.
+
+[pilot]
+us_only = true
+groups = ["engineer", "founder", "researcher", "creator"]
+per_group_limit = 100
+
+[gemini]
+model = ""                      # set in M0 after `lead-engine check --live` lists models
+prompt_version = "v1"
+max_regenerations = 1
+
+[emails]
+verifier = ""                   # hosted verifier chosen in M0 (see docs/DESIGN.md section 6)
+budget_usd_per_run = 10
+engineer_policy = "published_personal_only"
+providers = ["published_page", "exa_websets", "hunter", "prospeo", "icypeas"]
+
+[instantly]
+mode = "auto"                   # api if the key works, else csv
+contact_limit = 1000
+monthly_email_limit = 5000
+
+[instantly.campaigns]           # Instantly campaign IDs, one per group
+engineer = ""
+founder = ""
+researcher = ""
+creator = ""
+warm = ""
+
+[sending]
+daily_new_per_inbox = [15, 25, 35, 40]   # by pilot week
+inboxes = 0                     # number of warmed-up inboxes
+bounce_pause_pct = 2.0
+bounce_min_sends = 50
+events_max_age_hours = 26
+pilot_start = ""                # YYYY-MM-DD, first send day; drives the weekly ramp
+
+[sender]
+name = ""
+company = "Indoko"
+postal_address = ""
+
+[sender.booking_links]          # one Cal.com link per group, for attribution
+engineer = ""
+founder = ""
+researcher = ""
+creator = ""
+warm = ""
+
+[sheet]
+spreadsheet_id = ""
+review_tab = "Review"
+crm_tab = "CRM"
+suppression_tab = "Suppression"
+metrics_tab = "Metrics"
+linkedin_tab = "LinkedIn"
+
+[drive]
+warm_file_ids = []              # Drive IDs of the warm-list Excel files
+backup_folder_id = ""           # a folder in a Shared Drive
+
+[retention]
+uncontacted_days = 90
+backup_days = 14
+
+[storage]
+backend = "sqlite"              # sqlite now; postgres when hosted (M6)
+database_url = ""
