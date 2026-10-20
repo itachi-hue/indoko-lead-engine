@@ -352,10 +352,21 @@ def source_creators(ctx, run, limit: int) -> int:
     return ingest_articles(ctx, run, "creator", fetch_articles(ctx, run, "creator", limit * 3), limit)
 
 
-def source(ctx, run, group: str, limit: int, field: str | None = None) -> int:
+FREE_DEFAULTS = {"engineer": "patents", "founder": "sec_form_d"}
+
+
+def source(ctx, run, group: str, limit: int, field: str | None = None, via: str | None = None) -> int:
+    """Free sources by default (cost); `via="exa"` uses the paid Exa search instead."""
+    via = via or ctx.settings.get(f"sourcing.{group}_source", FREE_DEFAULTS.get(group, "exa"))
     if group == "engineer":
+        if via == "patents":
+            from . import patents
+            return patents.source(ctx, run, limit)
         return source_engineers(ctx, run, limit)
     if group == "founder":
+        if via == "sec_form_d":
+            from . import sec_formd
+            return sec_formd.source(ctx, run, limit)
         return source_founders(ctx, run, limit)
     if group == "creator":
         return source_creators(ctx, run, limit)

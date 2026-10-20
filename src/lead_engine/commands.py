@@ -255,7 +255,7 @@ def cmd_source(ctx, args, run):
         n = cold.ingest_articles(ctx, run, args.group, arts, limit, extracted)
         print(f"{args.group}: {n} people imported from {len(arts)} articles ({run.skipped} articles yielded nobody verifiable)")
         return 0
-    n = cold.source(ctx, run, args.group, limit, args.field)
+    n = cold.source(ctx, run, args.group, limit, args.field, args.via)
     print(f"{args.group}: {n} people added or updated (cost ~${run.cost_usd:.2f}, skipped {run.skipped})")
     return 0
 
@@ -265,6 +265,8 @@ def _(p):
     p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
     p.add_argument("--limit", type=int)
     p.add_argument("--field", help="researchers only: e.g. computer-science, biology, physics")
+    p.add_argument("--via", choices=["patents", "sec_form_d", "exa"],
+                   help="override the source (defaults are free: patents for engineers, SEC Form D for founders)")
     p.add_argument("--save-articles", action="store_true",
                    help="founders/creators: fetch news articles and save them for outside extraction")
     p.add_argument("--max-articles", type=int)

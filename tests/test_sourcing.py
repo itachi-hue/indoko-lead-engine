@@ -88,7 +88,7 @@ def test_source_engineers_with_evidence(sctx):
     ])
     sctx.settings.data["sourcing"] = {"queries": {"engineer": ["staff software engineer at Google"]}}
     with Run(sctx.con, "source") as r:
-        n = cold.source(sctx, r, "engineer", 5)
+        n = cold.source(sctx, r, "engineer", 5, via="exa")
     assert n == 1 and r.skipped == 1 and r.cost_usd > 0
     p = sctx.con.execute("SELECT * FROM persons").fetchone()
     assert (p["employer_domain"], p["us_located"]) == ("google.com", 1)
@@ -107,7 +107,7 @@ def test_source_founders(sctx):
                                          {"name": "Charles Babbage", "title": "CTO"}]}]
     sctx.settings.data["sourcing"] = {"queries": {"founder": ["startup raises seed round"]}}
     with Run(sctx.con, "source") as r:
-        assert cold.source(sctx, r, "founder", 10) == 2
+        assert cold.source(sctx, r, "founder", 10, via="exa") == 2
     rows = sctx.con.execute("SELECT * FROM signals WHERE signal_type='funding'").fetchall()
     assert {r["evidence_text"] for r in rows} == {"Northwind raised $4M in a seed round"}
     assert all(p["us_located"] == 1 for p in sctx.con.execute("SELECT us_located FROM persons"))
@@ -115,7 +115,7 @@ def test_source_founders(sctx):
     sctx.gemini.outputs = [dict(sctx.gemini.outputs or {}, **{"company": "Northwind", "round": "seed",
                                "founders": [{"name": "Ada Lovelace"}]})]
     with Run(sctx.con, "source") as r:
-        cold.source(sctx, r, "founder", 10)
+        cold.source(sctx, r, "founder", 10, via="exa")
     assert sctx.con.execute("SELECT COUNT(*) n FROM persons").fetchone()["n"] == 2
 
 
