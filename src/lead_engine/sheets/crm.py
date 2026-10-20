@@ -105,11 +105,11 @@ def pull_suppression(ctx) -> int:
         if not val:
             continue
         reason = r[1] if len(r) > 1 else "manual"
-        if "@" in val:
+        if "@" in val and not val.startswith("@"):
             e = suppression.normalize_email(val)
             if e and suppression.add(con, "email", e, reason or "manual", "manual"):
                 added += 1
-        elif "." in val:
+        elif "." in val.lstrip("@"):      # "competitor.com" or "@competitor.com"
             if suppression.add(con, "domain", val.lstrip("@"), reason or "manual", "manual"):
                 added += 1
     con.commit()
