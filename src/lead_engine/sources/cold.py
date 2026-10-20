@@ -145,78 +145,111 @@ def _key(*parts: str) -> str:
     return "|".join(re.sub(r"\s+", " ", p.strip().lower()) for p in parts)
 
 
-def source_founders(ctx, run, limit: int) -> int:
-    added = 0
-    for q in _queries(ctx, "founder"):
-        if added >= limit:
+ARTICLE_GROUPS = {
+    "founder": (extract.FOUNDER_SYSTEM, extract.FOUNDER_SCHEMA, 180),
+    "creator": (extract.CREATOR_SYSTEM, extract.CREATOR_SCHEMA, 365),
+}
+
+
+def fetch_articles(ctx, run, group: str, max_articles: int) -> list[dict]:
+    """Recent news articles for founders or creators (Exa news search, with text)."""
+    days = ARTICLE_GROUPS[group][2]
+    out, seen = [], set()
+    for q in _queries(ctx, group):
+        if len(out) >= max_articles:
             break
         for art in _search(ctx, run, q, num_results=10, category="news", include_text=True,
-                           start_published_date=_since(180)):
-            if added >= limit:
-                break
-            text = art.get("text") or ""
+                           start_published_date=_since(days)):
+            url = art.get("url")
+            if not url or url in seen or not art.get("text"):
+                continue
+            seen.add(url)
+            out.append({k: art.get(k) for k in ("url", "title", "publishedDate", "text")})
+    return out[:max_articles]
+
+
+def _ingest_founder(ctx, run, art: dict, raw: dict, room: int) -> int:
+    text = art.get("text") or ""
+    rec = extract.verify_founder_record(raw or {}, text)
+    if not rec:
+        run.skipped += 1
+        return 0
+    loc = us_located(rec.get("location")) if rec.get("location") else us_located(text[:1500])
+    fact = f"{rec['company']} raised" + (f" {rec['amount']}" if rec.get("amount") else " funding") + \
+        (f" in a {rec['round']} round" if rec.get("round") else "")
+    added = 0
+    for f in rec["founders"][:room]:
+        pid = resolve_person(ctx.con, [("founder_key", _key(f["name"], rec["company"]))], f["name"],
+                             segment="founder", group_source="cold", primary_employer=rec["company"],
+                             title=(f.get("title") or "Founder")[:80], us_located=loc,
+                             country=rec.get("location"))
+        db.add_signal(ctx.con, pid, "funding", rec.get("amount") or "", art.get("url"),
+                      evidence_text=fact, evidence_date=(art.get("publishedDate") or "")[:10] or None,
+                      url=art.get("url"))
+        db.upsert_source_record(ctx.con, "exa_news", art.get("url", ""), "article",
+                                {"title": art.get("title"), "url": art.get("url"), "record": rec})
+        added += 1
+    return added
+
+
+def _ingest_creator(ctx, run, art: dict, raw: dict, room: int) -> int:
+    text = art.get("text") or ""
+    recs = extract.verify_creator_records(raw or {}, text)
+    if not recs:
+        run.skipped += 1
+        return 0
+    added = 0
+    for rec in recs[:room]:
+        loc = us_located(rec.get("location"))
+        pid = resolve_person(ctx.con, [("creator_key", _key(rec["name"], rec.get("discipline", "")))],
+                             rec["name"], segment="creator", group_source="cold",
+                             title=rec.get("discipline"), us_located=loc, country=rec.get("location"))
+        outlet = urllib.parse.urlparse(art.get("url", "")).netloc.removeprefix("www.")
+        db.add_signal(ctx.con, pid, "press", outlet, art.get("url"), evidence_text=rec["achievement"],
+                      evidence_date=(art.get("publishedDate") or "")[:10] or None, url=art.get("url"))
+        _add_personal_site(ctx, run, pid, rec["name"])
+        added += 1
+    return added
+
+
+def ingest_articles(ctx, run, group: str, articles: list[dict], limit: int,
+                    extracted: dict[str, dict] | None = None) -> int:
+    """Extract people from each article and import only what the article text supports.
+
+    `extracted` maps article URL -> extraction JSON prepared outside the pipeline (e.g. by Claude in a
+    session). Without it, Gemini extracts. Either way the same verification applies.
+    """
+    system, schema, _ = ARTICLE_GROUPS[group]
+    ingest = _ingest_founder if group == "founder" else _ingest_creator
+    added = 0
+    for art in articles:
+        if added >= limit:
+            break
+        if extracted is not None:
+            raw = extracted.get(art.get("url"))
+            if raw is None:
+                run.skipped += 1
+                continue
+        else:
             try:
-                raw = ctx.gemini.generate_json(extract.FOUNDER_SYSTEM, text[:12000], extract.FOUNDER_SCHEMA, 0.0)
+                raw = ctx.gemini.generate_json(system, (art.get("text") or "")[:12000], schema, 0.0)
                 run.cost_usd += EXTRACT_COST_USD
             except GeminiError:
                 run.skipped += 1
                 continue
-            rec = extract.verify_founder_record(raw, text)
-            if not rec:
-                run.skipped += 1
-                continue
-            loc = us_located(rec.get("location")) if rec.get("location") else us_located(text[:1500])
-            fact = f"{rec['company']} raised" + (f" {rec['amount']}" if rec.get("amount") else " funding") + \
-                (f" in a {rec['round']} round" if rec.get("round") else "")
-            for f in rec["founders"]:
-                if added >= limit:
-                    break
-                pid = resolve_person(ctx.con, [("founder_key", _key(f["name"], rec["company"]))], f["name"],
-                                     segment="founder", group_source="cold", primary_employer=rec["company"],
-                                     title=(f.get("title") or "Founder")[:80], us_located=loc,
-                                     country=rec.get("location"))
-                db.add_signal(ctx.con, pid, "funding", rec.get("amount") or "", art.get("url"),
-                              evidence_text=fact, evidence_date=(art.get("publishedDate") or "")[:10] or None,
-                              url=art.get("url"))
-                db.upsert_source_record(ctx.con, "exa_news", art.get("url", ""), "article",
-                                        {"title": art.get("title"), "url": art.get("url"), "record": rec})
-                added += 1
-                run.ok += 1
-            ctx.con.commit()
+        n = ingest(ctx, run, art, raw, limit - added)
+        added += n
+        run.ok += n
+        ctx.con.commit()
     return added
+
+
+def source_founders(ctx, run, limit: int) -> int:
+    return ingest_articles(ctx, run, "founder", fetch_articles(ctx, run, "founder", limit * 3), limit)
 
 
 def source_creators(ctx, run, limit: int) -> int:
-    added = 0
-    for q in _queries(ctx, "creator"):
-        if added >= limit:
-            break
-        for art in _search(ctx, run, q, num_results=10, category="news", include_text=True,
-                           start_published_date=_since(365)):
-            if added >= limit:
-                break
-            text = art.get("text") or ""
-            try:
-                raw = ctx.gemini.generate_json(extract.CREATOR_SYSTEM, text[:12000], extract.CREATOR_SCHEMA, 0.0)
-                run.cost_usd += EXTRACT_COST_USD
-            except GeminiError:
-                run.skipped += 1
-                continue
-            for rec in extract.verify_creator_records(raw, text):
-                if added >= limit:
-                    break
-                loc = us_located(rec.get("location"))
-                pid = resolve_person(ctx.con, [("creator_key", _key(rec["name"], rec.get("discipline", "")))],
-                                     rec["name"], segment="creator", group_source="cold",
-                                     title=rec.get("discipline"), us_located=loc, country=rec.get("location"))
-                outlet = urllib.parse.urlparse(art.get("url", "")).netloc.removeprefix("www.")
-                db.add_signal(ctx.con, pid, "press", outlet, art.get("url"), evidence_text=rec["achievement"],
-                              evidence_date=(art.get("publishedDate") or "")[:10] or None, url=art.get("url"))
-                _add_personal_site(ctx, run, pid, rec["name"])
-                added += 1
-                run.ok += 1
-            ctx.con.commit()
-    return added
+    return ingest_articles(ctx, run, "creator", fetch_articles(ctx, run, "creator", limit * 3), limit)
 
 
 def source(ctx, run, group: str, limit: int, field: str | None = None) -> int:

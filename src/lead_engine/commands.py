@@ -237,6 +237,24 @@ def cmd_source(ctx, args, run):
     if ctx.dry_run:
         print(f"[dry-run] would source up to {limit} '{args.group}' people (no API calls made)")
         return 0
+    if args.save_articles or args.extractions:
+        if args.group not in cold.ARTICLE_GROUPS:
+            print("--save-articles / --extractions apply to founders and creators only")
+            return 2
+        out_dir = ctx.settings.data_dir / "extract"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if args.save_articles:
+            arts = cold.fetch_articles(ctx, run, args.group, args.max_articles or limit * 3)
+            path = out_dir / f"{args.group}-articles-{db.now()[:10]}.json"
+            path.write_text(json.dumps(arts, indent=1))
+            print(f"saved {len(arts)} articles to {path} (cost ~${run.cost_usd:.2f}). Write extractions as "
+                  f"{{url: extraction}} and run: source --group {args.group} --articles {path} --extractions <file>")
+            return 0
+        arts = json.loads(Path(args.articles).read_text())
+        extracted = json.loads(Path(args.extractions).read_text())
+        n = cold.ingest_articles(ctx, run, args.group, arts, limit, extracted)
+        print(f"{args.group}: {n} people imported from {len(arts)} articles ({run.skipped} articles yielded nobody verifiable)")
+        return 0
     n = cold.source(ctx, run, args.group, limit, args.field)
     print(f"{args.group}: {n} people added or updated (cost ~${run.cost_usd:.2f}, skipped {run.skipped})")
     return 0
@@ -247,6 +265,11 @@ def _(p):
     p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
     p.add_argument("--limit", type=int)
     p.add_argument("--field", help="researchers only: e.g. computer-science, biology, physics")
+    p.add_argument("--save-articles", action="store_true",
+                   help="founders/creators: fetch news articles and save them for outside extraction")
+    p.add_argument("--max-articles", type=int)
+    p.add_argument("--articles", help="founders/creators: saved articles file (with --extractions)")
+    p.add_argument("--extractions", help="founders/creators: JSON {article url: extraction} to verify and import")
 
 
 @command("score", "Score everyone in the cold groups (achievements only)")

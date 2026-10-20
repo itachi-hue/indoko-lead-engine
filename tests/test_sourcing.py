@@ -173,3 +173,19 @@ def test_scoring_achievement_only_and_percentiles(con):
     assert '"stage": 0.75' in sub
     assert not any(k in sub for k in ("immigration", "sponsorship", "remuneration", "employer"))
     assert scoring.evidence_ok(con, a) and not scoring.evidence_ok(con, f)
+
+
+def test_outside_extractions_are_still_verified(sctx):
+    arts = [{"url": "https://news/nw", "title": "Northwind raises", "publishedDate": "2026-09-10", "text": ARTICLE},
+            {"url": "https://news/other", "title": "x", "publishedDate": "2026-09-10", "text": "Nothing here."}]
+    extracted = {
+        "https://news/nw": {"company": "Northwind", "round": "seed", "amount": "$9M",       # $9M not in article
+                            "founders": [{"name": "Ada Lovelace"}, {"name": "Invented Person"}]},
+        "https://news/other": {"company": "Ghost Inc", "founders": [{"name": "No One"}]},
+    }
+    with Run(sctx.con, "source") as r:
+        n = cold.ingest_articles(sctx, r, "founder", arts, 10, extracted)
+    assert n == 1 and r.skipped == 1
+    fact = sctx.con.execute("SELECT evidence_text FROM signals WHERE signal_type='funding'").fetchone()[0]
+    assert fact == "Northwind raised funding in a seed round"            # unverified amount dropped
+    assert sctx.gemini.prompts == []                                      # Gemini never called
