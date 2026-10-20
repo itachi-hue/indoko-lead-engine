@@ -296,3 +296,34 @@ def cmd_linkedin(ctx, args, run):
 @configure("linkedin")
 def _(p):
     p.add_argument("--limit", type=int, default=50)
+
+
+# ---------------- pilot operations ----------------
+@command("report", "Write weekly funnel metrics to the Metrics tab")
+def cmd_report(ctx, args, run):
+    from . import report
+
+    n = report.write(ctx, run)
+    print(json.dumps({"rows": n, "reply_reasons": report.reply_reasons(ctx.con)}, indent=2))
+    return 0
+
+
+@command("backup", "Encrypt the database with age and upload it to the Shared Drive folder")
+def cmd_backup(ctx, args, run):
+    from . import maintenance
+
+    try:
+        print(json.dumps(maintenance.backup(ctx, run)))
+    except maintenance.BackupError as exc:
+        print(f"backup not made: {exc}")
+        run.note(str(exc))
+        return 1
+    return 0
+
+
+@command("retention", "Delete people never contacted after the retention window (default 90 days)")
+def cmd_retention(ctx, args, run):
+    from . import maintenance
+
+    print(f"deleted {maintenance.retention(ctx, run)} never-contacted people")
+    return 0

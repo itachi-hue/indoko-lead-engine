@@ -74,3 +74,11 @@ backup_days = 14
 [storage]
 backend = "sqlite"              # sqlite now; postgres when hosted (M6)
 database_url = ""
+
+[backup]
+age_recipient = ""              # age public key (age1...); the private key lives in the Keychain + password manager
+
+[sourcing]
+people_category = "people"      # Exa category for people search
+# [sourcing.queries]            # optional overrides of the default search queries per group
+# engineer = ["staff software engineer at Google in the United States"]
