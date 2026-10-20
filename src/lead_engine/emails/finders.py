@@ -42,7 +42,9 @@ def name_matches(email: str, display_name: str) -> bool:
     if len(parts) < 2:
         return False
     first, last = parts[0], parts[-1]
-    return first in local or last in local or local in (first[0] + last, first + last[0])
+    # The surname must be there: a shared first name matched colleagues on a staff list (live test, Oct 2026)
+    clean = re.sub(r"[^a-z]", "", local)
+    return last in clean or clean in (first[0] + last, first + last[0], first + last)
 
 
 class Finder:

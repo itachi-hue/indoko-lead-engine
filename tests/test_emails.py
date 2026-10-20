@@ -58,6 +58,8 @@ def test_emails_in_text_and_obfuscation():
 
 def test_name_matching():
     assert finders.name_matches("ada.lovelace@x.com", "Ada Lovelace")
+    assert finders.name_matches("hjalitto@ucdavis.edu", "Henry J. Alitto")
+    assert not finders.name_matches("ada.byron@x.com", "Ada Lovelace")      # shared first name only
     assert finders.name_matches("alovelace@x.com", "Ada Lovelace")
     assert not finders.name_matches("bob@x.com", "Ada Lovelace")
 
@@ -166,3 +168,19 @@ def test_engineer_page_must_name_employer(ctx):
     ctx.exa = FakeExaPages([{"url": "https://chan.dev", "text": "Ada Lovelace, designer in Berlin. ada@chan.dev"}])
     with Run(ctx.con, "x") as r:
         assert finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r) == []
+
+
+def test_discover_only_marks_nobody_and_reuses_lookups(ctx, monkeypatch):
+    pid = person(ctx.con, "founder", employer_domain="northwind.ai")
+    hun = StubFinder("hunter", ["ada@northwind.ai"])
+    monkeypatch.setattr(finders, "available", lambda c: {"hunter": hun})
+    monkeypatch.setattr(verify, "build", lambda c: None)
+    with Run(ctx.con, "find-emails") as r:
+        res = find.find_emails(ctx, r, "founder", 10, 5.0, discover_only=True)
+    assert res["unverified_candidates"]["Ada Lovelace"][0]["email"] == "ada@northwind.ai"
+    assert db.get_person(ctx.con, pid)["email"] is None                   # not usable until verified
+    v = StubVerifier()
+    monkeypatch.setattr(verify, "build", lambda c: v)
+    with Run(ctx.con, "find-emails") as r:
+        res = find.find_emails(ctx, r, "founder", 10, 5.0)
+    assert res["found"] == 1 and hun.calls == 1 and v.calls == ["ada@northwind.ai"]   # lookup not repeated

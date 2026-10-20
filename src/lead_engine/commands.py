@@ -299,7 +299,7 @@ def cmd_find_emails(ctx, args, run):
         n = len(candidates_for(ctx.con, args.group, limit))
         print(f"[dry-run] {n} '{args.group}' people need an email; budget ${budget:.2f}; no lookups made")
         return 0
-    print(json.dumps(find_emails(ctx, run, args.group, limit, budget)))
+    print(json.dumps(find_emails(ctx, run, args.group, limit, budget, args.discover_only), indent=1))
     return 0
 
 
@@ -308,6 +308,8 @@ def _(p):
     p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
     p.add_argument("--limit", type=int)
     p.add_argument("--budget", type=float, help="dollars for this run (default from config)")
+    p.add_argument("--discover-only", action="store_true",
+                   help="no verifier yet: collect unverified candidates without marking anyone ready to email")
 
 
 # ---------------- LinkedIn list (engineers without a personal email) ----------------
