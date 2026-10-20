@@ -132,11 +132,12 @@ def test_suppressed_candidates_skipped(ctx, stubs, monkeypatch):
 def test_budget_cap_stops(ctx, stubs, monkeypatch):
     for i in range(5):
         person(ctx.con, "founder", name=f"Ada L{i}", employer_domain="n.ai")
-    monkeypatch.setattr(finders, "available", lambda c: {"icypeas": StubFinder("icypeas", [], cost=0.5)})
-    finders.GROUP_ORDER["founder"].append("icypeas") if "icypeas" not in finders.GROUP_ORDER["founder"] else None
+    icy = StubFinder("icypeas", [], cost=0.5)
+    monkeypatch.setattr(finders, "available", lambda c: {"icypeas": icy})
+    monkeypatch.setattr(finders, "GROUP_ORDER", {**finders.GROUP_ORDER, "founder": ["icypeas"]})
     with Run(ctx.con, "find-emails") as r:
         res = find.find_emails(ctx, r, "founder", 10, 1.0)
-    assert res["cost_usd"] <= 1.0 + 0.5 and res["missed"] <= 3
+    assert icy.calls == 2 and res["cost_usd"] == 1.0          # stopped once $1.00 was spent
 
 
 def test_no_verifier_refuses(ctx, monkeypatch):
