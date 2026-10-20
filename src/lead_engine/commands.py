@@ -220,3 +220,38 @@ def cmd_run_daily(ctx, args, run):
             return code
     run.ok += 1
     return 0
+
+
+# ---------------- cold sourcing and scoring ----------------
+@command("source", "Find people for one cold group (Exa, or OpenAlex for researchers)")
+def cmd_source(ctx, args, run):
+    from .sources import cold
+
+    limit = args.limit or int(ctx.settings.get("pilot.per_group_limit", 100))
+    if ctx.dry_run:
+        print(f"[dry-run] would source up to {limit} '{args.group}' people (no API calls made)")
+        return 0
+    n = cold.source(ctx, run, args.group, limit, args.field)
+    print(f"{args.group}: {n} people added or updated (cost ~${run.cost_usd:.2f}, skipped {run.skipped})")
+    return 0
+
+
+@configure("source")
+def _(p):
+    p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
+    p.add_argument("--limit", type=int)
+    p.add_argument("--field", help="researchers only: e.g. computer-science, biology, physics")
+
+
+@command("score", "Score everyone in the cold groups (achievements only)")
+def cmd_score(ctx, args, run):
+    from . import scoring
+
+    counts = scoring.score_all(ctx.con)
+    run.ok += sum(counts.values())
+    ready = {}
+    for seg in counts:
+        rows = ctx.con.execute("SELECT person_id FROM persons WHERE segment=? AND us_located=1", (seg,)).fetchall()
+        ready[seg] = sum(1 for r in rows if scoring.evidence_ok(ctx.con, r["person_id"]))
+    print(json.dumps({"scored": counts, "us_with_2plus_dated_evidence": ready}, indent=2))
+    return 0
