@@ -93,6 +93,12 @@ def preflight(ctx, today: dt.date | None = None) -> int:
              dt.datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)).total_seconds() / 3600
     if age_h > max_age:
         raise SendBlocked(f"`events` last succeeded {age_h:.0f}h ago (limit {max_age:.0f}h)")
+    from ..eval.harness import invariants
+
+    inv = invariants(ctx)
+    if not inv["pass"]:
+        raise SendBlocked(f"invariant violated: {sorted(inv['violations'])}. Investigate with "
+                          "`lead-engine eval invariants` before sending again")
     cap = daily_cap(s, today)
     if cap <= 0:
         raise SendBlocked("sending.inboxes is 0; set the number of warmed-up inboxes in config.toml")

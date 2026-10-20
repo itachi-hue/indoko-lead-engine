@@ -102,3 +102,32 @@ uv run lead-engine linkedin   # engineers with no personal email -> LinkedIn tab
   ```bash
   age -d -i key.txt backup.sqlite.age > data/lead_engine.sqlite
   ```
+
+## Evaluation (M7, docs/DESIGN.md section 18)
+
+**Labelling sheets** (written to `eval/data/`, which is git-ignored because they contain personal data):
+
+```bash
+uv run lead-engine eval sample sourcing      # 25 per group
+uv run lead-engine eval sample dedupe        # 50 people
+uv run lead-engine eval sample evidence      # 50 facts
+uv run lead-engine eval sample scoring       # 30 pairs
+uv run lead-engine eval sample emails        # 30 found addresses (+ find rate and cost per group)
+uv run lead-engine eval sample drafts        # 50 drafts, for Karishma to score 1-5 and approve/edit
+# fill in the label_ columns, then:
+uv run lead-engine eval score <stage> eval/data/<file>.csv
+```
+
+**Automatic checks:**
+
+```bash
+uv run lead-engine eval checks       # the six checks against the 40 labelled drafts
+uv run lead-engine eval invariants   # pass-or-fail rules over every send; `send` runs these too
+uv run lead-engine eval pilot        # funnel per group, 95% ranges, scale / fix / stop decision
+```
+
+**About the results:**
+
+- Every result is appended to `eval/data/results.jsonl`.
+- Run `eval pilot` at pilot week 4, and again at week 8 or later, because clients close late.
+- Agree the decision rules with Karishma before the pilot starts.

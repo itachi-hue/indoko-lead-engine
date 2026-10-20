@@ -327,3 +327,34 @@ def cmd_retention(ctx, args, run):
 
     print(f"deleted {maintenance.retention(ctx, run)} never-contacted people")
     return 0
+
+
+# ---------------- evaluation (M7) ----------------
+@command("eval", "Evaluation: sample, score, checks, invariants, pilot (docs/DESIGN.md section 18)")
+def cmd_eval(ctx, args, run):
+    from .eval import harness
+
+    if args.action == "sample":
+        path = harness.sample(ctx, args.stage, args.n, args.seed)
+        print(f"labelling sheet: {path}\nFill in the label_ columns, then: lead-engine eval score {args.stage} {path}")
+        return 0
+    if args.action == "score":
+        res = harness.score(ctx, args.stage, Path(args.file))
+    elif args.action == "checks":
+        res = harness.checks_eval()
+    elif args.action == "invariants":
+        res = harness.invariants(ctx)
+    else:
+        res = harness.pilot(ctx)
+    harness.save(ctx, res)
+    print(json.dumps(res, indent=2))
+    return 0 if res.get("pass", True) else 1
+
+
+@configure("eval")
+def _(p):
+    p.add_argument("action", choices=["sample", "score", "checks", "invariants", "pilot"])
+    p.add_argument("stage", nargs="?", choices=["sourcing", "dedupe", "evidence", "scoring", "emails", "drafts"])
+    p.add_argument("file", nargs="?")
+    p.add_argument("--n", type=int)
+    p.add_argument("--seed", type=int)

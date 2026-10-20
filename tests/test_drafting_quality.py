@@ -7,7 +7,7 @@ from lead_engine.runtime import Run
 
 from conftest import make_person
 from fakes import FakeGemini, FakeSheets
-from labelled_drafts import ALL, BAD, EV, GOOD, LINK, NAMES
+from lead_engine.eval.labelled_drafts import ALL, BAD, EV, GOOD, LINK, NAMES
 
 FOOTER = 'Karishma, Indoko · 1 Market St\nThis is a message about Indoko\'s services. Reply "unsubscribe"...'
 

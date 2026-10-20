@@ -25,3 +25,6 @@ build/
 
 # Local config (client-specific IDs)
 config.toml
+
+# Evaluation labelling sheets (contain personal data)
+eval/data/
