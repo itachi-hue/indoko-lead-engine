@@ -277,3 +277,22 @@ def _(p):
     p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
     p.add_argument("--limit", type=int)
     p.add_argument("--budget", type=float, help="dollars for this run (default from config)")
+
+
+# ---------------- LinkedIn list (engineers without a personal email) ----------------
+@command("linkedin", "Prepare connection notes for engineers with no usable email, and add them to the LinkedIn tab")
+def cmd_linkedin(ctx, args, run):
+    from .drafting import linkedin
+
+    if ctx.dry_run:
+        print(f"[dry-run] {len(linkedin.eligible(ctx.con, args.limit))} engineers would get a note")
+        return 0
+    made = linkedin.prepare(ctx, run, args.limit)
+    pushed = linkedin.push(ctx, run)
+    print(f"prepared {made} notes, added {pushed} rows to the LinkedIn tab")
+    return 0
+
+
+@configure("linkedin")
+def _(p):
+    p.add_argument("--limit", type=int, default=50)

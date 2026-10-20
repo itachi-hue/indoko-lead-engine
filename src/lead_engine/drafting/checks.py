@@ -53,6 +53,7 @@ BANNED_PHRASES = [
     "groundbreaking", "revolutionary", "just checking in", "quick question", "pick your brain",
     "no pitch", "not a pitch", "amazing", "incredible", "impressive", "thrilled", "excited to",
     "i'm excited", "delve", "unlock your", "take your career", "dream", "journey", "leverage",
+    "loved your", "big fan", "huge fan", "blown away", "stellar", "rockstar",
 ]
 
 MAX_BODY_WORDS = 120
