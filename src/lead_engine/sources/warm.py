@@ -45,7 +45,12 @@ US_TOKENS = {"usa", "us", "u.s.", "u.s.a.", "united states", "united states of a
 NON_US_HINTS = {"canada", "uk", "united kingdom", "england", "india", "germany", "france", "london",
                 "toronto", "vancouver", "berlin", "bangalore", "bengaluru", "singapore", "australia",
                 "ireland", "netherlands", "spain", "italy", "israel", "china", "japan", "brazil", "mexico",
-                "switzerland", "sweden", "europe", "eu"}
+                "switzerland", "sweden", "europe", "eu", "tel aviv", "paris", "amsterdam", "stockholm", "zurich",
+                "dublin", "munich", "sao paulo", "são paulo", "buenos aires", "mumbai", "delhi", "new delhi",
+                "hyderabad", "shanghai", "beijing", "shenzhen", "tokyo", "seoul", "sydney", "melbourne", "lagos",
+                "nairobi", "cape town", "mexico city", "argentina", "argentine", "chile", "colombia", "turkey",
+                "türkiye", "uae", "dubai", "abu dhabi", "egypt", "nigeria", "kenya", "pakistan", "bangladesh",
+                "vietnam", "indonesia", "philippines", "thailand", "malaysia", "taiwan", "hong kong", "korea"}
 
 
 def us_located(location: str | None) -> int | None:

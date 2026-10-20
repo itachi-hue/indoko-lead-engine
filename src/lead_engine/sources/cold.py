@@ -34,8 +34,11 @@ DEFAULT_QUERIES = {
                  for lvl in ("staff", "principal")],
     "founder": ["startup raises seed round", "startup raises Series A", "Y Combinator startup raises funding",
                 "founders announce funding round for AI startup"],
-    "creator": ["filmmaker wins festival award", "musician wins award", "artist announces solo exhibition",
-                "photographer wins award", "documentary premieres at film festival", "designer wins award"],
+    # US-focused: generic "festival award" searches returned only UK/Iran/Greece/Philippines winners (live, Oct 2026)
+    "creator": ["Sundance Film Festival award winners announced", "Tribeca Festival award winners",
+                "SXSW film festival jury award winners", "Grammy nominees announced first-time nominee",
+                "Guggenheim Fellowship artists filmmakers awarded", "New York gallery solo exhibition emerging artist",
+                "Los Angeles artist wins award", "US documentary filmmaker wins award"],
 }
 SENIOR_TITLE = re.compile(r"\b(staff|principal|distinguished|senior staff|fellow|director|"
                           r"head of|vp|lead)\b", re.I)
@@ -245,16 +248,21 @@ ARTICLE_GROUPS = {
 def fetch_articles(ctx, run, group: str, max_articles: int) -> list[dict]:
     """Recent news articles for founders or creators (Exa news search, with text)."""
     days = ARTICLE_GROUPS[group][2]
-    out, seen = [], set()
-    for q in _queries(ctx, group):
+    queries = _queries(ctx, group)
+    per_query = max(1, -(-max_articles // len(queries)))   # spread across searches: one query alone
+    out, seen = [], set()                                    # returned 10 copies of the same story
+    for q in queries:
         if len(out) >= max_articles:
             break
-        for art in _search(ctx, run, q, num_results=10, category="news", include_text=True,
+        n = max(per_query, 3)
+        taken = 0
+        for art in _search(ctx, run, q, num_results=n, category="news", include_text=True,
                            start_published_date=_since(days)):
             url = art.get("url")
-            if not url or url in seen or not art.get("text"):
+            if taken >= per_query or not url or url in seen or not art.get("text"):
                 continue
             seen.add(url)
+            taken += 1
             out.append({k: art.get(k) for k in ("url", "title", "publishedDate", "text")})
     return out[:max_articles]
 
@@ -265,7 +273,8 @@ def _ingest_founder(ctx, run, art: dict, raw: dict, room: int) -> int:
     if not rec:
         run.skipped += 1
         return 0
-    loc = us_located(rec.get("location")) if rec.get("location") else us_located(text[:1500])
+    # Only a location the article states counts; guessing from the text (e.g. a photo caption) is not enough
+    loc = us_located(rec.get("location")) if rec.get("location") else None
     fact = f"{rec['company']} raised" + (f" {rec['amount']}" if rec.get("amount") else " funding") + \
         (f" in a {rec['round']} round" if rec.get("round") else "")
     added = 0
