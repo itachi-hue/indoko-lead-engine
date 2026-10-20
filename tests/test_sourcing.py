@@ -78,7 +78,8 @@ def test_source_engineers_with_evidence(sctx):
         {"title": "Unrelated patent", "url": "https://patents.google.com/p2", "text": "Inventor: John Smith"}])
     sctx.exa.on(r"talk", [{"title": "Scaling caches at Google", "url": "https://conf/talk",
                            "publishedDate": "2025-06-01", "text": "Speaker: Ada Lovelace, Staff Engineer, Google"}])
-    sctx.exa.on(r"personal website", [{"title": "Ada Lovelace", "url": "https://ada.dev"}])
+    sctx.exa.on(r"personal website", [{"title": "Ada Lovelace", "url": "https://adalovelace.dev",
+                                       "text": "Ada Lovelace, software engineer at Google."}])
     sctx.exa.on(r"engineer at", [
         {"title": "Ada Lovelace - Staff Software Engineer - Google | LinkedIn",
          "url": "https://www.linkedin.com/in/ada", "text": "San Francisco Bay Area · 500+ connections"},
@@ -94,7 +95,7 @@ def test_source_engineers_with_evidence(sctx):
     ev = [s["evidence_text"] for s in db.evidence_for(sctx.con, p["person_id"])]
     assert len(ev) == 2 and any("Patent" in e for e in ev) and all("John Smith" not in e for e in ev)
     site = sctx.con.execute("SELECT value FROM signals WHERE signal_type='personal_site'").fetchone()
-    assert site["value"] == "https://ada.dev"
+    assert site["value"] == "https://adalovelace.dev"
 
 
 # ---------------- founders and creators ----------------
@@ -189,3 +190,48 @@ def test_outside_extractions_are_still_verified(sctx):
     fact = sctx.con.execute("SELECT evidence_text FROM signals WHERE signal_type='funding'").fetchone()[0]
     assert fact == "Northwind raised funding in a seed round"            # unverified amount dropped
     assert sctx.gemini.prompts == []                                      # Gemini never called
+
+
+def test_parse_profile_from_exa_entity():
+    r = {"title": "Matthew Chu", "url": "https://linkedin.com/in/m", "entities": [{"type": "person", "properties": {
+        "name": "Matthew Chu", "location": "Hoboken, New Jersey, United States",
+        "workHistory": [{"title": "Staff Software Engineer", "dates": {"from": "2011-08-01", "to": None},
+                         "company": {"name": "Google"}},
+                        {"title": "Associate Researcher", "dates": {"from": "2009-01-01", "to": "2011-07-01"},
+                         "company": {"name": "MIT"}}]}}]}
+    p = cold.parse_profile(r)
+    assert (p["name"], p["company"], p["headline"]) == ("Matthew Chu", "Google", "Staff Software Engineer at Google")
+    assert "United States" in p["location_hint"]
+
+
+
+@pytest.mark.parametrize("kind,result,ok", [
+    ("patent", {"title": "Distributed cache invalidation - US Patent 11,234,567", "url": "https://patents.google.com/p1",
+                "text": "Inventors: Ada Lovelace. Assignee: Google LLC"}, True),
+    # same name, different person: no employer in the text (the live 'biotech patents' case)
+    ("patent", {"title": "IL-15 variants and uses thereof", "url": "https://patents.google.com/p2",
+                "text": "Inventor: Ada Lovelace. Assignee: Xencor Inc"}, False),
+    # not a patent source (the live LinkedIn / ContactOut / personal-site cases)
+    ("patent", {"title": "Ada Lovelace", "url": "https://linkedin.com/in/ada", "text": "Ada Lovelace Google"}, False),
+    ("patent", {"title": "Ada Lovelace Email & Phone | Google - ContactOut", "url": "https://contactout.com/ada",
+                "text": "Ada Lovelace Google"}, False),
+    ("patent", {"title": "Ada Lovelace", "url": "https://adalovelace.dev", "text": "Ada Lovelace Google"}, False),
+    # title is just the name
+    ("talk", {"title": "Ada Lovelace", "url": "https://conf.example/ada", "text": "Ada Lovelace, Google"}, False),
+    ("talk", {"title": "Ada Lovelace - Staff Software Engineer at Google", "url": "https://profiles.example/ada",
+              "text": "Ada Lovelace Google"}, False),
+    ("talk", {"title": "Scaling caches at planet scale", "url": "https://conf.example/t",
+              "text": "Speaker: Ada Lovelace, Staff Engineer, Google"}, True),
+])
+def test_evidence_ok(kind, result, ok):
+    assert cold.evidence_ok(kind, "Ada Lovelace", "Google", result) is ok
+
+
+def test_personal_site_rejects_namesake(sctx):
+    pid = db.create_person(sctx.con, "Matthew Irvine", segment="engineer")
+    sctx.exa.on(r"personal website", [
+        {"title": "Matthew Irvine Music", "url": "http://matthewirvinemusic.com", "text": "Matthew Irvine, songwriter."},
+        {"title": "Daniel's portfolio", "url": "https://www.linkedin.com/in/matthew-irvine", "text": "Matthew Irvine Google"}])
+    with Run(sctx.con, "x") as r:
+        cold._add_personal_site(sctx, r, pid, "Matthew Irvine", "Google")
+    assert sctx.con.execute("SELECT COUNT(*) FROM signals WHERE signal_type='personal_site'").fetchone()[0] == 0

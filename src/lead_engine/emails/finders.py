@@ -76,6 +76,9 @@ class PublishedPageFinder(Finder):
             text = page.get("text") or ""
             if person["display_name"] and person["display_name"].split()[-1].lower() not in text.lower():
                 continue  # the page must be about this person
+            if person["segment"] == "engineer" and person["primary_employer"] and \
+                    person["primary_employer"].lower() not in text.lower():
+                continue  # common names: only trust a page that also names their employer
             for e in emails_in(text):
                 if suppression.is_role_address(e):
                     continue

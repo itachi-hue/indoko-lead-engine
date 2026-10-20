@@ -28,30 +28,42 @@ def _mailto(settings) -> str:
 
 
 def search_authors(ctx, limit: int, field: str | None = None, min_h: int = 8, max_h: int = 45,
-                   min_works: int = 10) -> list[dict]:
-    """US-affiliated authors with a real record but not already famous (h-index window)."""
+                   min_works: int = 10, min_cites: int = 500, max_cites: int = 20000) -> list[dict]:
+    """US-affiliated authors with a real record but not already famous.
+
+    Live test (Oct 2026) showed why each filter is needed: sorting by citations alone returned
+    Transformer authors with 100k+ citations; common names without ORCID were merged profiles.
+    """
     filters = ["last_known_institutions.country_code:US", f"summary_stats.h_index:{min_h}-{max_h}",
-               f"works_count:>{min_works}"]
+               f"works_count:>{min_works}", f"cited_by_count:{min_cites}-{max_cites}", "has_orcid:true"]
     if field:
         filters.append(f"topics.field.id:{FIELDS.get(field, field)}")
-    out, cursor = [], "*"
-    while cursor and len(out) < limit:
-        url = (f"{BASE}/authors?filter={','.join(filters)}&per_page=50&sort=cited_by_count:desc"
-               f"&cursor={urllib.parse.quote(cursor)}{_mailto(ctx.settings)}")
-        data = http.get_json(ctx.client, url)
-        out.extend(data.get("results", []))
-        cursor = (data.get("meta") or {}).get("next_cursor")
-        if not data.get("results"):
-            break
+    # A seeded random sample spreads results across the whole citation window; sorting by citations
+    # bunched every result just under the cap. Same seed -> same people (reproducible).
+    seed = int(ctx.settings.get("sourcing.researcher_seed", 42))
+    url = (f"{BASE}/authors?filter={','.join(filters)}&sample={min(limit, 200)}&seed={seed}"
+           f"&per_page={min(limit, 200)}{_mailto(ctx.settings)}")
+    out = http.get_json(ctx.client, url).get("results", [])
     return out[:limit]
 
 
 def recent_works(ctx, author_id: str, n: int = 3) -> list[dict]:
     aid = author_id.rsplit("/", 1)[-1]
-    url = (f"{BASE}/works?filter=author.id:{aid}&sort=publication_date:desc&per_page={n}"
+    url = (f"{BASE}/works?filter=author.id:{aid},type:article|preprint|review|book-chapter"
+           f"&sort=publication_date:desc&per_page={n}"
            f"&select=id,doi,title,publication_year,publication_date,cited_by_count,primary_location"
            f"{_mailto(ctx.settings)}")
     return http.get_json(ctx.client, url).get("results", [])
+
+
+def recent_works_3y(a: dict) -> int:
+    import datetime as dt
+
+    floor = dt.date.today().year - 2
+    return sum(c.get("works_count", 0) for c in (a.get("counts_by_year") or []) if (c.get("year") or 0) >= floor)
+
+
+MIN_RECENT_WORKS = 2
 
 
 def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
@@ -75,7 +87,7 @@ def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
                   evidence_text=f"{a.get('cited_by_count', 0):,} citations across {a.get('works_count', 0)} papers",
                   url=prov)
     db.add_signal(con, pid, "works_count", a.get("works_count", 0), prov)
-    recent3 = sum(c.get("works_count", 0) for c in (a.get("counts_by_year") or [])[:3])
+    recent3 = recent_works_3y(a)
     db.add_signal(con, pid, "recent_works_3y", recent3, prov)
     for w in works:
         title = (w.get("title") or "").strip()
@@ -96,6 +108,9 @@ def source(ctx, run, limit: int, field: str | None = None) -> int:
     for a in authors:
         if added >= limit:
             break
+        if recent_works_3y(a) < MIN_RECENT_WORKS:
+            run.skipped += 1
+            continue
         try:
             works = recent_works(ctx, a["id"])
             if ingest_author(ctx, a, works):

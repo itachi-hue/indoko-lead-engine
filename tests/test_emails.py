@@ -67,7 +67,7 @@ def test_published_page_finder(ctx):
     db.add_signal(ctx.con, pid, "personal_site", "https://ada.dev", "https://ada.dev")
     ctx.con.commit()
     ctx.exa = FakeExaPages([{"url": "https://ada.dev",
-                             "text": "Ada Lovelace — engineer. Write to me: hi [at] ada [dot] dev. info@ada.dev"}])
+                             "text": "Ada Lovelace, engineer at Google. Write to me: hi [at] ada [dot] dev. info@ada.dev"}])
     with Run(ctx.con, "x") as r:
         out = finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r)
     assert [c["email"] for c in out] == ["hi@ada.dev"]          # role address dropped
@@ -156,3 +156,13 @@ def test_no_verifier_refuses(ctx, monkeypatch):
 def test_verifier_mapping(router, ctx, cls, payload, expected):
     router.add("GET", r"millionverifier|zerobounce", payload)
     assert cls(ctx.client, "k").verify("a@b.co") == expected
+
+
+
+def test_engineer_page_must_name_employer(ctx):
+    pid = person(ctx.con, "engineer", employer="Google")
+    db.add_signal(ctx.con, pid, "personal_site", "https://chan.dev", "https://chan.dev")
+    ctx.con.commit()
+    ctx.exa = FakeExaPages([{"url": "https://chan.dev", "text": "Ada Lovelace, designer in Berlin. ada@chan.dev"}])
+    with Run(ctx.con, "x") as r:
+        assert finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r) == []

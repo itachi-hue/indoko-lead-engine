@@ -60,8 +60,30 @@ def _names_person(name: str, text: str) -> bool:
 
 
 # ---------------- engineers ----------------
+def _from_entity(result: dict) -> dict | None:
+    """Exa people results carry a structured person entity (verified live, Oct 2026)."""
+    for ent in result.get("entities") or []:
+        if ent.get("type") != "person":
+            continue
+        props = ent.get("properties") or {}
+        name = (props.get("name") or "").strip()
+        current = [j for j in props.get("workHistory") or [] if not (j.get("dates") or {}).get("to")]
+        if not name or not current:
+            return None
+        job = current[0]
+        company_name = ((job.get("company") or {}).get("name") or "").strip()
+        company = next((c for c in COMPANIES if c.lower() == company_name.lower()), None)
+        return {"name": name, "headline": f"{job.get('title') or ''} at {company_name}".strip(),
+                "company": company, "url": result.get("url", ""),
+                "location_hint": props.get("location") or job.get("location") or ""}
+    return None
+
+
 def parse_profile(result: dict) -> dict | None:
-    """'Ada Lovelace - Staff Software Engineer - Google | LinkedIn' -> name, headline, company."""
+    """Exa person entity if present; otherwise a 'Name - Headline - Company | LinkedIn' title."""
+    ent = _from_entity(result)
+    if ent:
+        return ent
     title = (result.get("title") or "").replace(" | LinkedIn", "")
     parts = [p.strip() for p in re.split(r"\s[-–|]\s", title) if p.strip()]
     if len(parts) < 2 or len(parts[0]) > 60:
@@ -76,15 +98,59 @@ def parse_profile(result: dict) -> dict | None:
             "location_hint": (result.get("text") or "")[:300]}
 
 
+NOT_EVIDENCE_DOMAINS = (
+    "linkedin.com", "contactout.com", "rocketreach.co", "zoominfo.com", "signalhire.com", "apollo.io",
+    "theorg.com", "facebook.com", "x.com", "twitter.com", "instagram.com", "github.com", "scholar.google.",
+    "crunchbase.com", "peoplefinders", "spokeo", "whitepages", "luma.com", "lu.ma", "baiten.cn",
+    "uspto.report", "patents.us", "trea.com", "getprog.ai", "rocketreach", "lusha.com", "clay.com",
+)
+PROFILE_TITLE = re.compile(r"\b(engineer|developer|manager|director|scientist|founder)\b.{0,40}\bat\b", re.I)
+EVIDENCE_DOMAINS = {
+    "patent": ("patents.google.com", "uspto.gov", "patents.justia.com", "freepatentsonline.com",
+               "patentimages.storage.googleapis.com"),
+    "paper": ("arxiv.org", "doi.org", "acm.org", "ieee.org", "openreview.net", "aclanthology.org",
+              "neurips.cc", "mlr.press", "usenix.org", "semanticscholar.org"),
+}
+
+
+def _domain(url: str) -> str:
+    return urllib.parse.urlparse(url or "").netloc.lower().removeprefix("www.")
+
+
+def _clean_title(title: str) -> str:
+    return re.sub(r"\s+", " ", (title or "")).strip()
+
+
+def evidence_ok(kind: str, name: str, company: str | None, result: dict) -> bool:
+    """Is this search result really about this person, and real evidence of `kind`?
+
+    Live test (Oct 2026): name-only matching attached other people's patents (same name, different
+    field) and treated LinkedIn/data-broker pages as patents. So: the employer must be mentioned,
+    the source must suit the kind, and the title must say more than the name.
+    """
+    url, dom = result.get("url") or "", _domain(result.get("url"))
+    if any(b in dom for b in NOT_EVIDENCE_DOMAINS):
+        return False
+    if kind in EVIDENCE_DOMAINS and not any(dom.endswith(d) or d in dom for d in EVIDENCE_DOMAINS[kind]):
+        return False
+    title = _clean_title(result.get("title"))
+    rest = re.sub(re.escape(name), "", title, flags=re.I)
+    if len(re.findall(r"[A-Za-z]{3,}", rest)) < 3:
+        return False
+    if re.search(re.escape(name), title, re.I) and PROFILE_TITLE.search(rest):
+        return False  # "Name - Staff Engineer at X" is a profile page, not a talk or patent
+    text = f"{title} {(result.get('text') or '')[:4000]}"
+    if not _names_person(name, text):
+        return False
+    return bool(company) and company.lower() in text.lower()
+
+
 def _add_evidence(ctx, run, pid: str, name: str, company: str | None, kind: str, query: str) -> int:
     added = 0
     for r in _search(ctx, run, query, num_results=5, include_text=True):
-        text = f"{r.get('title', '')} {(r.get('text') or '')[:3000]}"
-        if not _names_person(name, text):
+        if not evidence_ok(kind, name, company, r):
             continue
-        if kind == "talk" and company and company.lower() not in text.lower():
-            continue  # talks are noisy; require the employer too
-        title = (r.get("title") or "").strip()[:160]
+        title = _clean_title(r.get("title"))[:160]
         date = (r.get("publishedDate") or "")[:10] or None
         label = {"patent": "Patent", "talk": "Talk", "paper": "Paper", "project": "Open-source project"}[kind]
         db.add_signal(ctx.con, pid, kind, 1, r.get("url"), evidence_text=f'{label}: "{title}"',
@@ -95,26 +161,51 @@ def _add_evidence(ctx, run, pid: str, name: str, company: str | None, kind: str,
     return added
 
 
-def _add_personal_site(ctx, run, pid: str, name: str) -> None:
-    for r in _search(ctx, run, f"{name} personal website", num_results=3, category="personal site"):
-        if _names_person(name, f"{r.get('title', '')} {r.get('url', '')}"):
-            db.add_signal(ctx.con, pid, "personal_site", r.get("url"), r.get("url"))
-            return
+WORK_WORDS = re.compile(r"\b(engineer|engineering|software|developer|research|scientist|founder|startup|"
+                        r"machine learning|ml|ai|systems|product|code|programming)\b", re.I)
+
+
+def _add_personal_site(ctx, run, pid: str, name: str, company: str | None = None) -> None:
+    parts = [p.lower() for p in re.findall(r"[A-Za-z]{2,}", name)]
+    for r in _search(ctx, run, f"{name} personal website", num_results=3, category="personal site",
+                     include_text=True):
+        url, dom = r.get("url") or "", _domain(r.get("url"))
+        if any(b in dom for b in NOT_EVIDENCE_DOMAINS):
+            continue
+        if not parts or parts[-1] not in dom.replace("-", "").replace(".", ""):
+            continue  # the address should carry their surname
+        text = f"{r.get('title', '')} {(r.get('text') or '')[:3000]}"
+        if not _names_person(name, text):
+            continue
+        if company and company.lower() not in text.lower() and not WORK_WORDS.search(text):
+            continue  # likely someone else with the same name
+        db.add_signal(ctx.con, pid, "personal_site", url, url)
+        return
 
 
 def source_engineers(ctx, run, limit: int) -> int:
     category = ctx.settings.get("sourcing.people_category", "people")
+    queries = _queries(ctx, "engineer")
+    per_query = max(1, -(-limit // len(queries)))  # spread people across companies and levels
     added = 0
-    for q in _queries(ctx, "engineer"):
+    for q in queries:
         if added >= limit:
             break
+        from_this_query = 0
         for r in _search(ctx, run, q, num_results=10, category=category, include_text=True):
-            if added >= limit:
+            if added >= limit or from_this_query >= per_query:
                 break
             prof = parse_profile(r)
             if not prof or not prof["company"] or not SENIOR_TITLE.search(prof["headline"]):
                 run.skipped += 1
                 continue
+            surname = prof["name"].split()[-1]
+            if len(surname.strip(".")) < 2 or surname.endswith("."):
+                run.skipped += 1          # "Daniel E." is too ambiguous to match evidence to
+                continue
+            if db.find_person_by_identifier(ctx.con, "linkedin", prof["url"]):
+                continue                  # already sourced; don't spend on evidence again
+            from_this_query += 1
             loc = us_located(prof["location_hint"])
             id_type = "linkedin" if "linkedin.com/in/" in prof["url"] else "exa"
             pid = resolve_person(ctx.con, [(id_type, prof["url"])], prof["name"], segment="engineer",
@@ -129,7 +220,7 @@ def source_engineers(ctx, run, limit: int) -> int:
             if n == 0:
                 n += _add_evidence(ctx, run, pid, prof["name"], prof["company"], "paper",
                                    f'"{prof["name"]}" research paper')
-            _add_personal_site(ctx, run, pid, prof["name"])
+            _add_personal_site(ctx, run, pid, prof["name"], prof["company"])
             ctx.con.commit()
             added += 1
             run.ok += 1
