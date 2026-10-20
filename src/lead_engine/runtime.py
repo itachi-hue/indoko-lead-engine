@@ -38,6 +38,30 @@ def run_lock(path: Path):
             fh.close()
 
 
+LOCK_KEY = 815_204_311  # arbitrary, stable advisory-lock key for this app
+
+
+@contextmanager
+def advisory_lock(con):
+    """Postgres session-level advisory lock: works across serverless invocations."""
+    got = con.execute("SELECT pg_try_advisory_lock(?) AS ok", (LOCK_KEY,)).fetchone()["ok"]
+    if not got:
+        raise AlreadyRunning("another lead-engine run holds the database lock")
+    try:
+        yield
+    finally:
+        con.execute("SELECT pg_advisory_unlock(?)", (LOCK_KEY,))
+        con.commit()
+
+
+def lock_for(ctx):
+    from .storage import PgConnection
+
+    if isinstance(ctx.con, PgConnection):
+        return advisory_lock(ctx.con)
+    return run_lock(ctx.settings.lock_path)
+
+
 class Run:
     """Counts ok/failed/skipped items and cost for one command; written to `runs` on exit."""
 

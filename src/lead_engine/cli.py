@@ -11,7 +11,7 @@ import sys
 
 from . import __version__
 from .context import Context, setup_logging
-from .runtime import AlreadyRunning, Run, run_lock
+from .runtime import AlreadyRunning, Run, lock_for
 
 log = logging.getLogger("lead_engine")
 
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
 
     try:
         if spec["lock"]:
-            with run_lock(ctx.settings.lock_path):
+            with lock_for(ctx):
                 return execute()
         return execute()
     except AlreadyRunning as exc:

@@ -9,6 +9,9 @@ dependencies = [
     "google-auth>=2.30",
 ]
 
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+
 [project.scripts]
 lead-engine = "lead_engine.cli:main"
 

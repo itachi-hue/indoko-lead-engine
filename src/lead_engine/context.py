@@ -5,13 +5,14 @@ and tests can inject fakes by setting attributes directly.
 """
 from __future__ import annotations
 
+import json
 import logging
 from functools import cached_property
 from pathlib import Path
 
 import httpx
 
-from . import db, http
+from . import http
 from .config import Settings, load_settings
 
 
@@ -24,8 +25,10 @@ class Context:
 
     @cached_property
     def con(self):
-        con = db.connect(self.settings.db_path)
-        db.init_db(con)
+        from . import storage
+
+        con = storage.connect(self.settings)
+        storage.init(con)
         return con
 
     @cached_property
@@ -36,9 +39,12 @@ class Context:
     def google_auth(self):
         from .google_api import ServiceAccountAuth
 
+        raw = self.settings.secret("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if raw:                                   # hosted: key JSON in an env var
+            return ServiceAccountAuth.from_info(json.loads(raw), self.client)
         key = self.settings.secret("GOOGLE_SERVICE_ACCOUNT_FILE")
         if not key:
-            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_FILE is not set")
+            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_FILE (or GOOGLE_SERVICE_ACCOUNT_JSON) is not set")
         return ServiceAccountAuth(key, self.client)
 
     @cached_property

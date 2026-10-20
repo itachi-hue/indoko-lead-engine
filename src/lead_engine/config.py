@@ -20,6 +20,9 @@ SECRET_KEYS = (
     "VERIFIER_API_KEY",
     "OPENALEX_MAILTO",
     "ALERT_SMTP_URL",
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "DATABASE_URL",
+    "CRON_SECRET",
 )
 
 DEFAULTS: dict = {
@@ -152,11 +155,13 @@ def load_settings(root: Path | str | None = None, config_file: str = "config.tom
     """Load settings. `env` overrides the process environment (used in tests)."""
     root = Path(root or os.environ.get("LEAD_ENGINE_ROOT") or Path.cwd()).resolve()
     data = DEFAULTS
+    source = dict(os.environ) if env is None else dict(env)
     cfg = root / config_file
-    if cfg.exists():
+    if source.get("LEAD_ENGINE_CONFIG_TOML"):      # hosted: the whole config.toml in one env var
+        data = _merge(DEFAULTS, tomllib.loads(source["LEAD_ENGINE_CONFIG_TOML"]))
+    elif cfg.exists():
         with cfg.open("rb") as fh:
             data = _merge(DEFAULTS, tomllib.load(fh))
-    source = dict(os.environ) if env is None else dict(env)
     file_env = parse_env_file(root / ".env")
     secrets = {k: source.get(k) or file_env.get(k, "") for k in SECRET_KEYS}
     return Settings(root=root, data=data, secrets=secrets)

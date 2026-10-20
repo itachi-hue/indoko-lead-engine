@@ -1,0 +1,8 @@
+{
+  "functions": { "api/cron.py": { "maxDuration": 300 } },
+  "crons": [
+    { "path": "/api/cron?job=run-daily", "schedule": "0 15 * * *" },
+    { "path": "/api/cron?job=report", "schedule": "0 16 * * 1" },
+    { "path": "/api/cron?job=retention", "schedule": "30 10 * * *" }
+  ]
+}

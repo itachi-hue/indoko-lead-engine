@@ -25,12 +25,16 @@ GSHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 
 class ServiceAccountAuth:
-    def __init__(self, key_file: str | Path, client: httpx.Client, scopes=SCOPES):
-        self.info = json.loads(Path(key_file).read_text())
+    def __init__(self, key_file: str | Path | None, client: httpx.Client, scopes=SCOPES, info: dict | None = None):
+        self.info = info if info is not None else json.loads(Path(key_file).read_text())
         self.client = client
         self.scopes = scopes
         self._token: str | None = None
         self._expires = 0.0
+
+    @classmethod
+    def from_info(cls, info: dict, client: httpx.Client, scopes=SCOPES) -> "ServiceAccountAuth":
+        return cls(None, client, scopes, info=info)
 
     def _assertion(self) -> str:
         from google.auth import crypt, jwt  # local import keeps tests light

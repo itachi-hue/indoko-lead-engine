@@ -35,6 +35,10 @@ def encrypt(src: Path, dest: Path, recipient: str) -> None:
 
 
 def backup(ctx, run) -> dict:
+    from .storage import PgConnection
+
+    if isinstance(ctx.con, PgConnection):
+        raise BackupError("on Postgres, use the host's managed backups (point-in-time recovery or pg_dump)")
     s = ctx.settings
     folder = s.get("drive.backup_folder_id", "")
     recipient = s.get("backup.age_recipient", "")
