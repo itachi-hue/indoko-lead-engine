@@ -38,6 +38,21 @@ def strip_quoted(text: str) -> str:
     return (text or "")[: m.start()] if m else (text or "")
 
 
+def html_to_text(html: str) -> str:
+    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html or "")
+    text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|<blockquote", r"\n\g<0>", text)
+    text = re.sub(r"(?is)<blockquote.*", "\n> ", text)          # quoted original starts here
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def reply_text(em: dict) -> str:
+    body = em.get("body")
+    if isinstance(body, dict):
+        return body.get("text") or html_to_text(body.get("html") or "")
+    return body or ""
+
+
 def classify_reply(text: str) -> str:
     """'unsubscribe' if the first 200 characters ask to stop; 'ambiguous' for soft no's; else 'reply'."""
     head = strip_quoted(text)[:200]
@@ -90,14 +105,20 @@ class EventSink:
             _close_draft(self.con, send_row["draft_id"])
 
     def finish(self):
+        if self.new_suppressed:
+            suppression.stop_in_flight(self.con)
         self.con.commit()
         if self.new_suppressed:
             if self.mode == "api" and not self.ctx.dry_run:
+                failed = []
                 for e in self.new_suppressed:
                     try:
                         self.ctx.instantly.block(e)
                     except http.HTTPError as exc:
-                        self.run.note(f"blocklist add failed (HTTP {exc.status}); add it by hand")
+                        failed.append(e)
+                        self.run.note(f"blocklist add failed (HTTP {exc.status}); listed in suppression-export.csv")
+                if failed:
+                    write_suppression_export(self.ctx, failed)
             else:
                 write_suppression_export(self.ctx, self.new_suppressed)
 
@@ -149,7 +170,7 @@ def poll_api(ctx, run) -> dict:
         s = _send_by_email(con, email) if email else None
         if not s:
             continue
-        text = (em.get("body") or {}).get("text") if isinstance(em.get("body"), dict) else em.get("body")
+        text = reply_text(em)
         kind = classify_reply(text or "")
         eid = em.get("id") or f"{email}:{em.get('timestamp_created')}"
         if kind == "unsubscribe":

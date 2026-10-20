@@ -51,15 +51,44 @@ def add_email(con, email: str, reason: str, source: str) -> bool:
     return add(con, "email", e, reason, source)
 
 
+def parent_domains(domain: str) -> list[str]:
+    """eu.acme.com -> [eu.acme.com, acme.com] (never a bare TLD)."""
+    parts = domain.lower().split(".")
+    return [".".join(parts[i:]) for i in range(len(parts) - 1)]
+
+
 def is_suppressed(con, email: str | None) -> bool:
     e = normalize_email(email)
     if not e:
         return False
+    doms = parent_domains(domain_of(e))
     r = con.execute(
-        "SELECT 1 FROM suppression WHERE (match_type='email' AND value=?) OR "
-        "(match_type='domain' AND value=?) OR (match_type='email_hash' AND value=?) LIMIT 1",
-        (e, domain_of(e), email_hash(e))).fetchone()
+        f"SELECT 1 FROM suppression WHERE (match_type='email' AND value=?) OR (match_type='email_hash' AND value=?) "
+        f"OR (match_type='domain' AND value IN ({','.join('?' * len(doms))})) LIMIT 1",
+        (e, email_hash(e), *doms)).fetchone()
     return r is not None
+
+
+def stop_in_flight(con) -> int:
+    """Mark every not-yet-sent draft whose address is now suppressed as stale, and fail its pending send.
+    Call after adding suppression entries."""
+    from . import states  # local import avoids a cycle
+
+    stopped = 0
+    rows = con.execute(
+        "SELECT d.draft_id, p.email, s.send_id FROM drafts d JOIN persons p ON p.person_id=d.person_id "
+        "LEFT JOIN sends s ON s.draft_id=d.draft_id AND s.status='pending' "
+        f"WHERE d.state IN ({','.join('?' * 6)}) AND p.email IS NOT NULL",
+        (states.DRAFTED, states.NEEDS_MANUAL, states.PUSHED, states.APPROVED, states.EDITED,
+         states.QUEUED)).fetchall()
+    for r in rows:
+        if is_suppressed(con, r["email"]):
+            con.execute("UPDATE drafts SET state=?, notes=COALESCE(notes,'') || ' [not sent: suppressed]', "
+                        "updated_at=? WHERE draft_id=?", (states.STALE, db.now(), r["draft_id"]))
+            if r["send_id"]:
+                con.execute("UPDATE sends SET status='failed', error='suppressed' WHERE send_id=?", (r["send_id"],))
+            stopped += 1
+    return stopped
 
 
 def entries(con, sources: tuple[str, ...] | None = None) -> list[dict]:

@@ -133,17 +133,24 @@ def pull(ctx, run) -> dict:
         new = states.decide(decision, edits)
         if new is None:
             continue
+        hand_written = d["subject"] is None  # was needs_manual: there is no generated text to approve
+        if hand_written and new != states.REJECTED and not all(edits[f] for f in states.EDIT_FIELDS):
+            updates.append((f"{tab}!{notes_col}{rownum}",
+                            [["This draft has no generated text. Write the subject, body and both follow-ups "
+                              "in the Edited fields and set Edit."]]))
+            counts["failed_recheck"] += 1
+            continue
+        if hand_written and new == states.APPROVED:
+            new = states.EDITED
         if new == states.EDITED:
-            if d["subject"] is None and not (edits["edited_subject"] and edits["edited_body"]):
-                updates.append((f"{tab}!{notes_col}{rownum}",
-                                [["This draft needs a hand-written subject and body in the Edited fields."]]))
-                counts["failed_recheck"] += 1
-                continue
             problems = _recheck(ctx, d, edits)
             if problems:
                 counts["failed_recheck"] += 1
                 updates.append((f"{tab}!{notes_col}{rownum}", [["Edit failed checks: " + "; ".join(problems)]]))
                 continue
+        if ctx.dry_run:
+            counts[new] += 1
+            continue
         reviewer = _cell(row, "Reviewer") or None
         notes = _cell(row, "Notes") or None
         # re-check the state inside the write so a concurrent change is never overwritten
@@ -155,9 +162,11 @@ def pull(ctx, run) -> dict:
         if cur.rowcount:
             counts[new] += 1
             updates.append((f"{tab}!{state_col}{rownum}", [[new]]))
+    if ctx.dry_run:
+        print(f"[dry-run] review decisions that would apply: {counts}")
+        return counts
     con.commit()
-    if not ctx.dry_run:
-        ctx.sheets.batch_update_values(updates)
+    ctx.sheets.batch_update_values(updates)
     run.ok += counts["approved"] + counts["edited"] + counts["rejected"]
     run.skipped += counts["failed_recheck"]
     return counts

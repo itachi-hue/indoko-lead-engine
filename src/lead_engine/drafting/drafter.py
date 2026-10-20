@@ -35,6 +35,8 @@ def eligible_people(con, segment: str, limit: int, us_only: bool = True):
             LEFT JOIN scores s ON s.person_id = p.person_id
             WHERE p.segment = ? AND p.email IS NOT NULL
               AND p.email_status IN ('verified', 'catch_all_published', 'on_file')
+              AND EXISTS (SELECT 1 FROM person_identifiers i WHERE i.person_id = p.person_id
+                          AND i.id_type = 'email' AND i.id_value = lower(p.email))
               AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.person_id = p.person_id
                               AND d.state IN ({','.join('?' * len(ACTIVE_STATES))}))
               AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.person_id = p.person_id

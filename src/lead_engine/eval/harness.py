@@ -236,6 +236,10 @@ def invariants(ctx) -> dict:
         if s["attempted_at"] and (not ev or _hours(ev, s["attempted_at"]) > float(
                 ctx.settings.get("sending.events_max_age_hours", 26))):
             violations.setdefault("sent_with_stale_events", []).append(s["send_id"])
+    per_addr = con.execute("SELECT lower(email) e FROM sends WHERE email IS NOT NULL AND status IN "
+                           "('sent','exported','pending') GROUP BY lower(email) HAVING COUNT(*) > 1").fetchall()
+    if per_addr:
+        violations["multiple_sends_per_address"] = [r["e"] for r in per_addr]
     dup = con.execute("SELECT draft_id FROM sends GROUP BY draft_id HAVING COUNT(*) > 1").fetchall()
     if dup:
         violations["multiple_sends_per_draft"] = [r["draft_id"] for r in dup]

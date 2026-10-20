@@ -81,6 +81,8 @@ class Run:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if exc:
+            self.con.rollback()  # never keep half a run (e.g. suppressions not yet pushed to the blocklist)
         status = "error" if exc else ("failed" if self.exit_code else "ok")
         error = f"{exc_type.__name__}: {exc}" if exc else ("; ".join(self.notes) or None)
         self.con.execute("UPDATE runs SET finished_at=?, ok=?, failed=?, skipped=?, cost_usd=?, "

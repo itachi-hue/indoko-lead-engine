@@ -117,10 +117,13 @@ def cmd_events(ctx, args, run):
             res = events.poll_api(ctx, run)
     paused = events.bounce_guard(ctx, run)
     removed = sender.remove_finished(ctx, run)
-    flags = {pid: msg for pid, msg in res.get("flagged", [])}
-    if flags:
+    new_flags = {pid: msg for pid, msg in res.get("flagged", [])}
+    if new_flags:  # merge: a flag stays until the team tags a reply reason for that person
+        flags = json.loads(db.get_cursor(ctx.con, "control", "crm_flags") or "{}")
+        flags.update(new_flags)
         db.set_cursor(ctx.con, "control", "crm_flags", json.dumps(flags))
         ctx.con.commit()
+    flags = new_flags
     print(json.dumps({"suppressed": res["suppressed"], "flagged": len(flags), "paused": paused,
                       "removed_from_instantly": removed}))
     return 0
@@ -150,6 +153,12 @@ def cmd_crm(ctx, args, run):
 
     if args.action == "pull":
         print(json.dumps(crm.pull(ctx, run)))
+        flags = json.loads(db.get_cursor(ctx.con, "control", "crm_flags") or "{}")
+        tagged = {r["ckey"] for r in ctx.con.execute("SELECT ckey FROM crawl_cursors WHERE source='reply_reason'")}
+        if any(pid in tagged for pid in flags):
+            db.set_cursor(ctx.con, "control", "crm_flags",
+                          json.dumps({k: v for k, v in flags.items() if k not in tagged}))
+            ctx.con.commit()
     else:
         flags = json.loads(db.get_cursor(ctx.con, "control", "crm_flags") or "{}")
         print(json.dumps(crm.push(ctx, run, flags)))
@@ -182,12 +191,9 @@ def cmd_suppress(ctx, args, run):
     v = args.value.strip().lower()
     kind = "email" if "@" in v and not v.startswith("@") else "domain"
     added = suppression.add(ctx.con, kind, v.lstrip("@"), args.reason, "manual")
-    ctx.con.execute("UPDATE drafts SET state=?, updated_at=? WHERE state IN (?,?,?,?,?) AND person_id IN "
-                    "(SELECT person_id FROM persons WHERE lower(email)=? OR lower(email) LIKE ?)",
-                    (states.STALE, db.now(), states.DRAFTED, states.NEEDS_MANUAL, states.PUSHED, states.APPROVED,
-                     states.EDITED, v, f"%@{v.lstrip('@')}"))
+    stopped = suppression.stop_in_flight(ctx.con)
     ctx.con.commit()
-    print("added" if added else "already suppressed")
+    print(("added" if added else "already suppressed") + f"; {stopped} unsent drafts stopped")
     return 0
 
 

@@ -27,6 +27,8 @@ def forget(ctx, run, email: str) -> dict:
     con.commit()
 
     # 4. Instantly: delete leads, add to blocklist (CSV mode: export for manual blocklisting)
+    from .instantly.events import write_suppression_export
+
     if ctx.settings.get("instantly.mode", "auto") != "csv" and ctx.settings.secret("INSTANTLY_API_KEY"):
         for lead in leads:
             if lead["instantly_lead_id"]:
@@ -38,12 +40,18 @@ def forget(ctx, run, email: str) -> dict:
         try:
             ctx.instantly.block(e)
         except http.HTTPError as exc:
-            run.note(f"Instantly blocklist add failed (HTTP {exc.status}); add it by hand")
+            run.note(f"Instantly blocklist add failed (HTTP {exc.status}); listed in suppression-export.csv")
+            write_suppression_export(ctx, [e])
     else:
-        from .instantly.events import write_suppression_export
         write_suppression_export(ctx, [e])
 
-    # 2. Sheet rows
+    # 2. Sheet rows (the Suppression tab too, so the plain address isn't re-imported)
+    if ctx.settings.get("sheet.spreadsheet_id"):
+        stab = ctx.settings.get("sheet.suppression_tab", "Suppression")
+        for i, r in enumerate(ctx.sheets.get_values(stab)[1:], start=2):
+            if r and (r[0] or "").strip().lower() == e:
+                ctx.sheets.update_values(f"{stab}!A{i}:D{i}", [["", "", "", ""]])
+                result["sheet_rows_cleared"] += 1
     if pid and ctx.settings.get("sheet.spreadsheet_id"):
         from .sheets import crm, review
 

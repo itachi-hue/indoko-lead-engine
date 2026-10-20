@@ -46,7 +46,7 @@ def pilot_week(settings, today: dt.date | None = None) -> int:
     start = settings.get("sending.pilot_start", "")
     if not start:
         return 1
-    today = today or dt.date.today()
+    today = today or utc_today()
     days = (today - dt.date.fromisoformat(start)).days
     return max(1, days // 7 + 1)
 
@@ -58,8 +58,12 @@ def daily_cap(settings, today: dt.date | None = None) -> int:
     return int(settings.get("sending.inboxes", 0)) * per_inbox
 
 
+def utc_today() -> dt.date:
+    return dt.datetime.now(dt.timezone.utc).date()
+
+
 def sent_today(con, today: dt.date | None = None) -> int:
-    today = today or dt.date.today()
+    today = today or utc_today()
     return con.execute("SELECT COUNT(*) n FROM sends WHERE status IN ('sent','exported','pending') "
                        "AND substr(attempted_at,1,10)=?", (today.isoformat(),)).fetchone()["n"]
 
@@ -70,7 +74,7 @@ def active_in_instantly(con) -> int:
 
 
 def sends_this_month(con, today: dt.date | None = None) -> int:
-    today = today or dt.date.today()
+    today = today or utc_today()
     return con.execute("SELECT COUNT(*) n FROM sends WHERE status IN ('sent','exported') "
                        "AND substr(attempted_at,1,7)=?", (today.strftime("%Y-%m"),)).fetchone()["n"]
 
@@ -115,17 +119,43 @@ def resolve_mode(ctx) -> str:
     return "api" if ctx.instantly.ping().get("ok") else "csv"
 
 
+def block_reason(con, d, person, exclude_send: str | None = None) -> str | None:
+    """Why this draft must not go out right now, or None. Used at queue time AND before any retry."""
+    email = person["email"] if person else None
+    if not email:
+        return "no email address"
+    if suppression.is_suppressed(con, email):
+        return "suppressed address"
+    if violates_engineer_rule(person, email):
+        return "engineer at a corporate domain"
+    if not db.find_person_by_identifier(con, "email", email) == person["person_id"]:
+        return "address is bound to a different person record"
+    other = con.execute("SELECT 1 FROM sends WHERE lower(email)=? AND status IN ('sent','exported','pending') "
+                        "AND send_id IS NOT ?", (email.lower(), exclude_send)).fetchone()
+    if other:
+        return "this address was already emailed"
+    text = states.final_text(d)
+    if not all(text[k].strip() for k in ("subject", "body", "fu1", "fu2")):
+        return "subject, body or a follow-up is empty"
+    return None
+
+
+def _stale(con, draft_id: str, reason: str) -> None:
+    con.execute("UPDATE drafts SET state=?, notes=COALESCE(notes,'') || ?, updated_at=? WHERE draft_id=?",
+                (states.STALE, f" [not sent: {reason}]", db.now(), draft_id))
+
+
 def _queue(con, d, person, campaign: str, method: str) -> str | None:
     """Step 1. Returns send_id, or None if the draft must not be sent (it is marked stale)."""
     with con:  # one transaction
-        cur = con.execute("SELECT state FROM drafts WHERE draft_id=?", (d["draft_id"],)).fetchone()
-        if not cur or cur["state"] not in states.SENDABLE:
+        d = con.execute("SELECT * FROM drafts WHERE draft_id=?", (d["draft_id"],)).fetchone()
+        if not d or d["state"] not in states.SENDABLE:
+            return None
+        reason = block_reason(con, d, person)
+        if reason:
+            _stale(con, d["draft_id"], reason)
             return None
         email = person["email"]
-        if not email or suppression.is_suppressed(con, email) or violates_engineer_rule(person, email):
-            con.execute("UPDATE drafts SET state=?, notes=COALESCE(notes,'') || ?, updated_at=? WHERE draft_id=?",
-                        (states.STALE, " [not sent: suppressed or blocked address]", db.now(), d["draft_id"]))
-            return None
         send_id = db.new_id("s")
         con.execute("UPDATE drafts SET state=?, updated_at=? WHERE draft_id=?",
                     (states.QUEUED, db.now(), d["draft_id"]))
@@ -162,9 +192,23 @@ def recover_pending(ctx, run) -> int:
         else:
             d = con.execute("SELECT * FROM drafts WHERE draft_id=?", (s["draft_id"],)).fetchone()
             person = db.get_person(con, d["person_id"])
-            _push_api(ctx, s["send_id"], d, person, s["campaign_id"], run)
+            reason = block_reason(con, d, person, exclude_send=s["send_id"])
+            if reason:  # e.g. suppressed while the send was pending
+                with con:
+                    con.execute("UPDATE sends SET status='failed', error=? WHERE send_id=?", (reason, s["send_id"]))
+                    _stale(con, s["draft_id"], reason)
+                run.skipped += 1
+            else:
+                _push_api(ctx, s["send_id"], d, person, s["campaign_id"], run)
         fixed += 1
     return fixed
+
+
+def _cancel(con, send_id: str, draft_id: str, back_to: str) -> None:
+    """Undo step 1 so the reviewer's approval is not lost."""
+    with con:
+        con.execute("DELETE FROM sends WHERE send_id=?", (send_id,))
+        con.execute("UPDATE drafts SET state=?, updated_at=? WHERE draft_id=?", (back_to, db.now(), draft_id))
 
 
 def _push_api(ctx, send_id, d, person, campaign, run) -> None:
@@ -177,9 +221,12 @@ def _push_api(ctx, send_id, d, person, campaign, run) -> None:
             run.note(f"send {send_id} left pending after HTTP {exc.status}")
             run.failed += 1
             return
-        _mark(ctx.con, send_id, d["draft_id"], "failed", error=f"HTTP {exc.status}")
+        # any other 4xx (plan limit, bad request, auth): stop the whole run, keep the approval
+        edited = any((d[f] or "").strip() for f in states.EDIT_FIELDS)
+        _cancel(ctx.con, send_id, d["draft_id"], states.EDITED if edited else states.APPROVED)
         run.failed += 1
-        return
+        raise SendBlocked(f"Instantly refused the request (HTTP {exc.status}): {exc.body[:120]}. "
+                          "Approved drafts were kept; fix the cause and send again.")
     lead_id = resp.get("id") if isinstance(resp, dict) else None
     if not lead_id or resp.get("status") == "skipped":
         _mark(ctx.con, send_id, d["draft_id"], "failed", error="duplicate")
@@ -208,6 +255,18 @@ def send(ctx, run, today: dt.date | None = None, limit: int | None = None) -> di
               f"(room today: {room})")
         return summary
     csv_rows: dict[str, list[dict]] = {}
+    if mode == "csv":  # pending CSV rows mean a crash before the file was written: include them again
+        for s in con.execute("SELECT * FROM sends WHERE status='pending' AND method='csv'").fetchall():
+            pd = con.execute("SELECT * FROM drafts WHERE draft_id=?", (s["draft_id"],)).fetchone()
+            pp = db.get_person(con, pd["person_id"])
+            reason = block_reason(con, pd, pp, exclude_send=s["send_id"])
+            if reason:
+                with con:
+                    con.execute("UPDATE sends SET status='failed', error=? WHERE send_id=?", (reason, s["send_id"]))
+                    _stale(con, s["draft_id"], reason)
+                continue
+            csv_rows.setdefault(s["campaign_id"], []).append({"send_id": s["send_id"], "draft_id": s["draft_id"],
+                                                              "email": s["email"], **_variables(ctx, pd, pp)})
     for d in drafts:
         if summary["queued"] >= budget:
             run.note(f"stopped at the daily/contact/monthly limit ({budget}); {len(drafts) - summary['queued']} wait")
@@ -225,6 +284,7 @@ def send(ctx, run, today: dt.date | None = None, limit: int | None = None) -> di
             continue
         summary["queued"] += 1
         if mode == "api":
+            d = con.execute("SELECT * FROM drafts WHERE draft_id=?", (d["draft_id"],)).fetchone()
             _push_api(ctx, send_id, d, person, campaign, run)
         else:
             csv_rows.setdefault(campaign, []).append({"send_id": send_id, "draft_id": d["draft_id"],

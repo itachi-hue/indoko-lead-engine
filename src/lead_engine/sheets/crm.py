@@ -82,7 +82,7 @@ def pull(ctx, run) -> dict:
             val = (r[i] if i is not None and i < len(r) else "").strip()
             if val.lower() in NO_VALUES:
                 continue
-            occurred = val if len(val) >= 10 and val[4] == "-" else None
+            occurred = val[:10] if len(val) >= 10 and val[4] == "-" and val[7] == "-" else None
             if db.add_event(con, pid, etype, "crm", occurred_at=(occurred + "T00:00:00Z") if occurred else None,
                             external_id=f"crm:{pid}:{etype}"):
                 added += 1
@@ -99,7 +99,7 @@ def pull_suppression(ctx) -> int:
     con = ctx.con
     tab = _tab(ctx, "suppression_tab", "Suppression")
     values = ctx.sheets.get_values(tab)
-    added = 0
+    added, unreadable = 0, []
     for r in values[1:] if values else []:
         val = (r[0] if r else "").strip().lower()
         if not val:
@@ -107,12 +107,28 @@ def pull_suppression(ctx) -> int:
         reason = r[1] if len(r) > 1 else "manual"
         if "@" in val and not val.startswith("@"):
             e = suppression.normalize_email(val)
-            if e and suppression.add(con, "email", e, reason or "manual", "manual"):
+            if not e:
+                unreadable.append(val[:40])
+                continue
+            forgotten = con.execute("SELECT 1 FROM suppression WHERE match_type='email_hash' AND value=?",
+                                    (suppression.email_hash(e),)).fetchone()
+            if forgotten:
+                continue  # already blocked by hash after a forget request; don't store the address again
+            if suppression.add(con, "email", e, reason or "manual", "manual"):
                 added += 1
-        elif "." in val.lstrip("@"):      # "competitor.com" or "@competitor.com"
+        elif "." in val.lstrip("@") and " " not in val:      # "competitor.com" or "@competitor.com"
             if suppression.add(con, "domain", val.lstrip("@"), reason or "manual", "manual"):
                 added += 1
+        else:
+            unreadable.append(val[:40])
+    if added:
+        suppression.stop_in_flight(con)
     con.commit()
+    if unreadable:
+        import logging
+        logging.getLogger("lead_engine.crm").warning(
+            "Suppression tab: %d entries could not be read (one email or domain per row): %s",
+            len(unreadable), unreadable[:5])
     return added
 
 
