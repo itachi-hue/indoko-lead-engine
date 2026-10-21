@@ -109,6 +109,14 @@ class FounderDomainFinder(Finder):
     def find(self, ctx, person, run) -> list[dict]:
         from . import domains
 
+        from . import policy
+
+        if person["segment"] == "engineer":   # work address at the employer's known domain
+            dom = person["employer_domain"]
+            if not policy.ENGINEER_WORK_OK or not dom:
+                return []
+            return [{"email": e, "source": self.name, "url": f"https://{dom}"}
+                    for e in domains.pattern_candidates(person["display_name"], dom)]
         if person["segment"] != "founder" or not person["primary_employer"]:
             return []
         dom = person["employer_domain"]
@@ -198,7 +206,7 @@ class IcypeasFinder(Finder):
 
 
 GROUP_ORDER = {
-    "engineer": ["published_page", "exa_websets"],
+    "engineer": ["published_page", "exa_websets", "pattern_guess"],   # guesses only with work_address_ok
     "founder": ["published_page", "pattern_guess", "exa_websets", "hunter", "prospeo", "icypeas"],
     "researcher": ["published_page", "hunter", "prospeo"],
     "creator": ["published_page"],

@@ -264,7 +264,7 @@ Role addresses (info@, hello@) and disposable domains are always dropped.
 
 - No emails taken from GitHub profiles or commit history.
 - No guessed addresses.
-- For engineers, any address on their employer's domain, or on a known corporate domain list, is rejected.
+- For engineers, any address on their employer's domain, or on a known corporate domain list, is rejected. Exception: with `emails.engineer_policy = "work_address_ok"` (chosen 2026-10-20), an engineer may be emailed at their own employer's domain, as a pattern guess the verifier confirms as deliverable; other corporate domains stay blocked.
 
 ---
 
@@ -620,7 +620,7 @@ These are pass-or-fail rules. `lead-engine eval invariants` runs them as SQL che
 
 - No send to anyone on the suppression list, by email, domain or hash.
 - At most one send per draft, and at most one active draft per person.
-- No engineer emailed at an employer or corporate domain.
+- No engineer emailed at a corporate domain other than their own employer's (or at any corporate domain under the default policy).
 - No send unless `events` succeeded within the last 26 hours.
 - No send without an `approved` or `edited` decision.
 

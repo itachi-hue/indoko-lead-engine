@@ -20,6 +20,8 @@ class Context:
     def __init__(self, settings: Settings | None = None, transport: httpx.BaseTransport | None = None,
                  dry_run: bool = False):
         self.settings = settings or load_settings()
+        from .emails import policy
+        policy.configure(self.settings)
         self.transport = transport
         self.dry_run = dry_run
 

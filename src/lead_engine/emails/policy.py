@@ -19,6 +19,16 @@ PERSONAL_DOMAINS = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com",
                     "hey.com", "aol.com", "zoho.com"}
 
 
+# emails.engineer_policy: "published_personal_only" (default) or "work_address_ok".
+# Set once per process from config (context.Context), so every check, at find AND send time, agrees.
+ENGINEER_WORK_OK = False
+
+
+def configure(settings) -> None:
+    global ENGINEER_WORK_OK
+    ENGINEER_WORK_OK = (settings.get("emails.engineer_policy") or "") == "work_address_ok"
+
+
 def _employer_domains(person) -> set[str]:
     keys = person.keys() if hasattr(person, "keys") else person
     out = set()
@@ -28,11 +38,14 @@ def _employer_domains(person) -> set[str]:
 
 
 def violates_engineer_rule(person, email: str) -> bool:
-    """True if an engineer would be emailed at their employer's or any known corporate domain."""
+    """True if an engineer would be emailed at a corporate domain they are not allowed to be emailed at.
+    Default: their employer's and every known corporate domain. With work_address_ok: only corporate
+    domains other than their own employer's (never a guess at the wrong company)."""
     if person["segment"] != "engineer":
         return False
     dom = suppression.domain_of(email)
-    blocked = CORPORATE_DOMAINS | _employer_domains(person)
+    own = _employer_domains(person)
+    blocked = (CORPORATE_DOMAINS - own) if ENGINEER_WORK_OK else (CORPORATE_DOMAINS | own)
     return any(dom == b or dom.endswith("." + b) for b in blocked)
 
 
@@ -46,13 +59,14 @@ def acceptable(person, email: str, source: str, verification: str) -> tuple[bool
         return False, "role address"
     if violates_engineer_rule(person, email):
         return False, "engineer at a corporate domain"
-    if person["segment"] == "engineer" and source not in ("published_page", "exa_websets"):
+    engineer_sources = ("published_page", "exa_websets") + (("pattern_guess",) if ENGINEER_WORK_OK else ())
+    if person["segment"] == "engineer" and source not in engineer_sources:
         return False, "engineers: only addresses they published, or Websets"
     if person["segment"] == "creator" and source != "published_page":
         return False, "creators: only a contact published on their own site"
     if source == "pattern_guess":
-        if person["segment"] != "founder":
-            return False, "address guessing is for founders only"
+        if person["segment"] not in ("founder", "engineer"):
+            return False, "address guessing is for founders (and engineers, if work addresses are allowed)"
         # a guess must be confirmed as a real mailbox; catch-all servers accept anything, so not enough
         return (verification == "deliverable"), f"guess verification: {verification}"
     if verification == "deliverable" or verification == "on_file":

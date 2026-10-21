@@ -13,7 +13,7 @@ max_regenerations = 1
 [emails]
 verifier = "reoon"              # reoon (free ~600/mo) | millionverifier | zerobounce | reacher
 budget_usd_per_run = 10
-engineer_policy = "published_personal_only"
+engineer_policy = "published_personal_only"   # or "work_address_ok": engineers at their own employer domain (verified guesses)
 providers = ["published_page", "pattern_guess", "exa_websets", "hunter", "prospeo", "icypeas"]
 
 [instantly]

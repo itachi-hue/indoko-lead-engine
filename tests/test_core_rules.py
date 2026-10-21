@@ -42,6 +42,16 @@ def test_engineer_never_at_corporate_or_employer_domain(con):
     assert not policy.violates_engineer_rule(f, "f@google.com")
 
 
+def test_engineer_work_address_when_allowed(con, monkeypatch):
+    monkeypatch.setattr(policy, "ENGINEER_WORK_OK", True)
+    p = db.get_person(con, make_person(con, segment="engineer", employer_domain="google.com"))
+    assert not policy.violates_engineer_rule(p, "ada@google.com")      # own employer: allowed
+    assert policy.violates_engineer_rule(p, "ada@meta.com")            # another corporate domain: never
+    assert policy.acceptable(p, "ada@google.com", "pattern_guess", "deliverable")[0]
+    assert not policy.acceptable(p, "ada@google.com", "pattern_guess", "catch_all")[0]
+    assert not policy.acceptable(p, "ada@google.com", "pattern_guess", "unknown")[0]
+
+
 def test_acceptable_by_group(con):
     eng = db.get_person(con, make_person(con, segment="engineer"))
     assert policy.acceptable(eng, "ada@gmail.com", "published_page", "deliverable")[0]
