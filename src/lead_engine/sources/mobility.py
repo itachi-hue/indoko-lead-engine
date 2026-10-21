@@ -64,3 +64,67 @@ def inventor_move(patents: list[dict], within: int = 10, today_year: int | None 
 def record(con, person_id: str, move: dict, provenance: str) -> None:
     summary = f"{move['from_country']} {move['from_year']} -> US {move['first_us_year']}"
     db.add_signal(con, person_id, "moved_to_us", summary, provenance)   # no evidence_text: never quoted
+
+
+# ---------------- profiles (Exa people entities: workHistory + educationHistory) ----------------
+def _year(value) -> int | None:
+    s = str(value or "")
+    return int(s[:4]) if s[:4].isdigit() else None
+
+
+def school_country(ctx, name: str) -> str | None:
+    """Country code of a school, from OpenAlex institutions (free). Cached in source_records."""
+    import json
+    import urllib.parse
+
+    from .. import http
+
+    key = name.strip().lower()
+    if not key:
+        return None
+    row = ctx.con.execute("SELECT payload FROM source_records WHERE source='openalex_institution' "
+                          "AND source_native_id=?", (key,)).fetchone()
+    if row:
+        return (json.loads(row["payload"]) or {}).get("country_code")
+    try:
+        res = http.get_json(ctx.client, "https://api.openalex.org/institutions?search="
+                            + urllib.parse.quote(name) + "&per_page=1").get("results") or []
+    except http.HTTPError:
+        return None              # unknown; not cached so a later run can retry
+    cc = res[0].get("country_code") if res else None
+    db.upsert_source_record(ctx.con, "openalex_institution", key, "institution",
+                            {"query": name, "country_code": cc,
+                             "matched": res[0].get("display_name") if res else None})
+    return cc
+
+
+def profile_history(ctx, props: dict) -> list[tuple[int, str, str]]:
+    """(year, country, place) from job locations and school countries. Unknown places are dropped."""
+    from .warm import us_located
+
+    hist = []
+    for job in props.get("workHistory") or []:
+        y = _year((job.get("dates") or {}).get("from"))
+        where = us_located(job.get("location"))
+        if y and where is not None:
+            place = job.get("location") or ""
+            country = "US" if where else (place.rsplit(",", 1)[-1].strip() or "abroad")
+            hist.append((y, country, place))
+    for ed in props.get("educationHistory") or []:
+        y = _year((ed.get("dates") or {}).get("from"))
+        school = ((ed.get("institution") or {}).get("name") or "").strip()
+        if not y or not school or "high school" in school.lower():
+            continue
+        cc = school_country(ctx, school)
+        if cc:
+            hist.append((y, cc.upper(), school))
+    return hist
+
+
+def profile_move(ctx, props: dict, within: int, today_year: int | None = None) -> dict | None:
+    return _move(profile_history(ctx, props), within, today_year)
+
+
+def engineer_within_years(ctx) -> int:
+    """Engineers: longer window than researchers, since green-card backlogs keep people on visas for years."""
+    return int(ctx.settings.get("sourcing.engineer_moved_within_years", 15))

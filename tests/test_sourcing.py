@@ -86,7 +86,8 @@ def test_source_engineers_with_evidence(sctx):
         {"title": "Bob Builder - Software Engineer - Google | LinkedIn", "url": "https://www.linkedin.com/in/bob",
          "text": "Seattle"},                                       # not senior -> skipped
     ])
-    sctx.settings.data["sourcing"] = {"queries": {"engineer": ["staff software engineer at Google"]}}
+    sctx.settings.data["sourcing"] = {"queries": {"engineer": ["staff software engineer at Google"]},
+                                      "moved_to_us": "off"}
     with Run(sctx.con, "source") as r:
         n = cold.source(sctx, r, "engineer", 5, via="exa")
     assert n == 1 and r.skipped == 1 and r.cost_usd > 0
@@ -236,3 +237,43 @@ def test_personal_site_rejects_namesake(sctx):
     with Run(sctx.con, "x") as r:
         cold._add_personal_site(sctx, r, pid, "Matthew Irvine", "Google")
     assert sctx.con.execute("SELECT COUNT(*) FROM signals WHERE signal_type='personal_site'").fetchone()[0] == 0
+
+
+def _entity(name, company, jobs, schools):
+    return {"type": "person", "properties": {
+        "name": name, "location": "Seattle, Washington, United States",
+        "workHistory": [{"title": t, "location": loc, "company": {"name": co},
+                         "dates": {"from": f, "to": to}} for t, co, loc, f, to in jobs],
+        "educationHistory": [{"degree": "BS", "institution": {"name": sc}, "dates": {"from": y, "to": None}}
+                             for sc, y in schools]}}
+
+
+def test_source_engineers_requires_move_before_paid_evidence(sctx, router):
+    router.add("GET", r"api.openalex.org/institutions\?search=Osmania", {"results": [
+        {"display_name": "Osmania University", "country_code": "IN"}]})
+    router.add("GET", r"api.openalex.org/institutions\?search=Texas", {"results": [
+        {"display_name": "Texas A&M University", "country_code": "US"}]})
+    mover = _entity("Affan Moyeed", "Microsoft",
+                    [("Staff Software Engineer", "Microsoft", "Redmond, Washington, United States", "2019-05-01", None),
+                     ("Engineer", "Infosys", "Hyderabad, Telangana, India", "2014-01-01", "2017-01-01")],
+                    [("Osmania University", "2010")])
+    local = _entity("John Keech", "Microsoft",
+                    [("Staff Software Engineer", "Microsoft", "Redmond, Washington, United States", "2015-01-01", None)],
+                    [("Texas A&M University", "2004")])
+    elsewhere = _entity("Oleg Savin", "Stripe",
+                        [("Staff Engineer", "Stripe", "Seattle, Washington, United States", "2018-01-01", None)], [])
+    sctx.exa.on(r"engineer at Microsoft", [
+        {"title": "Affan", "url": "https://linkedin.com/in/affan", "text": "", "entities": [mover]},
+        {"title": "John", "url": "https://linkedin.com/in/john", "text": "", "entities": [local]},
+        {"title": "Oleg", "url": "https://linkedin.com/in/oleg", "text": "", "entities": [elsewhere]}])
+    sctx.settings.data["sourcing"] = {"queries": {"engineer": ["staff software engineer at Microsoft in Seattle"]},
+                                      "engineer_companies": ["Microsoft"], "engineer_evidence_searches": False}
+    with Run(sctx.con, "source") as r:
+        assert cold.source(sctx, r, "engineer", 5, via="exa") == 1
+    p = sctx.con.execute("SELECT * FROM persons").fetchone()
+    assert (p["display_name"], p["employer_domain"]) == ("Affan Moyeed", "microsoft.com")
+    move = sctx.con.execute("SELECT value FROM signals WHERE signal_type='moved_to_us'").fetchone()["value"]
+    assert move.startswith("IN 2010") and move.endswith("US 2019")
+    ev = [e["evidence_text"] for e in db.evidence_for(sctx.con, p["person_id"])]
+    assert ev == ["Staff Software Engineer at Microsoft since 2019"]          # the move is never evidence
+    assert len(sctx.exa.queries) == 1                                         # no evidence searches spent

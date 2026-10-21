@@ -50,7 +50,15 @@ NON_US_HINTS = {"canada", "uk", "united kingdom", "england", "india", "germany",
                 "hyderabad", "shanghai", "beijing", "shenzhen", "tokyo", "seoul", "sydney", "melbourne", "lagos",
                 "nairobi", "cape town", "mexico city", "argentina", "argentine", "chile", "colombia", "turkey",
                 "türkiye", "uae", "dubai", "abu dhabi", "egypt", "nigeria", "kenya", "pakistan", "bangladesh",
-                "vietnam", "indonesia", "philippines", "thailand", "malaysia", "taiwan", "hong kong", "korea"}
+                "vietnam", "indonesia", "philippines", "thailand", "malaysia", "taiwan", "hong kong", "korea",
+                "russia", "romania", "belarus", "ukraine", "poland", "iran", "sri lanka", "nepal", "greece",
+                "portugal", "belgium", "austria", "denmark", "norway", "finland", "czechia", "czech republic",
+                "hungary", "serbia", "croatia", "bulgaria", "lithuania", "latvia", "estonia", "slovakia",
+                "slovenia", "armenia", "georgia (country)", "kazakhstan", "uzbekistan", "jordan", "lebanon",
+                "saudi arabia", "qatar", "morocco", "tunisia", "ghana", "ethiopia", "south africa", "peru",
+                "venezuela", "ecuador", "new zealand", "south korea", "republic of korea", "moscow", "kyiv",
+                "warsaw", "bucharest", "cluj-napoca", "minsk", "tehran", "cairo", "colombo", "chennai", "pune",
+                "noida", "gurgaon", "gurugram", "kolkata", "ahmedabad", "nagpur", "hangzhou", "wuhan", "nanjing"}
 
 
 def us_located(location: str | None) -> int | None:

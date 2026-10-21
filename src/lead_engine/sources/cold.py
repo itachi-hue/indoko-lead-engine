@@ -15,7 +15,7 @@ import urllib.parse
 from .. import db, http
 from ..drafting.gemini import GeminiError
 from ..identity import resolve_person
-from . import extract
+from . import extract, mobility
 from .exa import CONTENTS_COST_USD, SEARCH_COST_USD
 from .warm import us_located
 
@@ -27,11 +27,29 @@ COMPANIES = {  # name -> primary domain (used for the engineer domain rule)
     "Microsoft": "microsoft.com", "Netflix": "netflix.com", "NVIDIA": "nvidia.com", "OpenAI": "openai.com",
     "Stripe": "stripe.com", "Databricks": "databricks.com", "Uber": "uber.com", "Airbnb": "airbnb.com",
     "LinkedIn": "linkedin.com", "Salesforce": "salesforce.com", "Tesla": "tesla.com",
+    # mid-size and large US tech employers; `lead-engine check-domains` keeps the ones whose mail
+    # servers confirm mailboxes (catch-all servers can't confirm a guessed work address)
+    "Snowflake": "snowflake.com", "Adobe": "adobe.com", "Intel": "intel.com", "AMD": "amd.com",
+    "Qualcomm": "qualcomm.com", "Cisco": "cisco.com", "Oracle": "oracle.com", "IBM": "ibm.com",
+    "Intuit": "intuit.com", "PayPal": "paypal.com", "eBay": "ebay.com", "Workday": "workday.com",
+    "ServiceNow": "servicenow.com", "Pinterest": "pinterest.com", "Dropbox": "dropbox.com",
+    "DoorDash": "doordash.com", "Lyft": "lyft.com", "Coinbase": "coinbase.com", "Robinhood": "robinhood.com",
+    "Cloudflare": "cloudflare.com", "Datadog": "datadoghq.com", "MongoDB": "mongodb.com",
+    "Twilio": "twilio.com", "Okta": "okta.com", "Zoom": "zoom.us", "Atlassian": "atlassian.com",
+    "Palantir": "palantir.com", "Snap": "snap.com", "Roblox": "roblox.com", "Instacart": "instacart.com",
+    "Figma": "figma.com", "Plaid": "plaid.com", "Rippling": "rippling.com", "Ramp": "ramp.com",
+    "Anthropic": "anthropic.com", "Scale AI": "scale.com", "Expedia": "expediagroup.com",
+    "Zillow": "zillowgroup.com", "Wayfair": "wayfair.com", "Etsy": "etsy.com", "Splunk": "splunk.com",
+    "Broadcom": "broadcom.com", "Samsung": "samsung.com", "Visa": "visa.com", "Block": "block.xyz",
 }
+ENGINEER_LEVELS = ("staff software engineer", "principal software engineer", "senior staff software engineer",
+                   "staff machine learning engineer", "principal engineer")
+ENGINEER_PLACES = ("in the United States", "in the San Francisco Bay Area", "in Seattle", "in New York",
+                   "in Austin, Texas")
 DEFAULT_QUERIES = {
-    "engineer": [f"{lvl} software engineer at {c} in the United States"
-                 for c in ("Google", "Meta", "Apple", "Amazon", "Microsoft", "Netflix", "NVIDIA")
-                 for lvl in ("staff", "principal")],
+    # place-major order: one pass over every company and level before repeating with a new place
+    "engineer": [f"{lvl} at {c} {place}" for place in ENGINEER_PLACES for c in COMPANIES
+                 for lvl in ENGINEER_LEVELS],
     "founder": ["startup raises seed round", "startup raises Series A", "Y Combinator startup raises funding",
                 "founders announce funding round for AI startup"],
     # US-focused: generic "festival award" searches returned only UK/Iran/Greece/Philippines winners (live, Oct 2026)
@@ -49,7 +67,7 @@ def _queries(ctx, group: str) -> list[str]:
     if custom:
         return list(custom)
     only = engineer_companies(ctx) if group == "engineer" else None
-    return [q for q in DEFAULT_QUERIES[group] if not only or any(f" at {c} " in q for c in only)]
+    return [q for q in DEFAULT_QUERIES[group] if not only or any(f" at {c} in " in q for c in only)]
 
 
 def engineer_companies(ctx) -> list[str]:
@@ -88,7 +106,9 @@ def _from_entity(result: dict) -> dict | None:
         company = next((c for c in COMPANIES if c.lower() == company_name.lower()), None)
         return {"name": name, "headline": f"{job.get('title') or ''} at {company_name}".strip(),
                 "company": company, "url": result.get("url", ""),
-                "location_hint": props.get("location") or job.get("location") or ""}
+                "location_hint": job.get("location") or props.get("location") or "",
+                "title": job.get("title") or "", "since": (job.get("dates") or {}).get("from"),
+                "props": props}
     return None
 
 
@@ -199,13 +219,18 @@ def _add_personal_site(ctx, run, pid: str, name: str, company: str | None = None
 def source_engineers(ctx, run, limit: int) -> int:
     category = ctx.settings.get("sourcing.people_category", "people")
     queries = _queries(ctx, "engineer")
-    per_query = max(1, -(-limit // len(queries)))  # spread people across companies and levels
-    added = 0
+    # continue where the last run stopped, so repeated runs reach new people
+    start = int(db.get_cursor(ctx.con, "exa_people", "engineer_query") or 0) % len(queries)
+    queries = queries[start:] + queries[:start]
+    per_query = int(ctx.settings.get("sourcing.engineer_per_query", 5))
+    num = int(ctx.settings.get("sourcing.engineer_results_per_search", 25))
+    added = used = 0
     for q in queries:
         if added >= limit:
             break
+        used += 1
         from_this_query = 0
-        for r in _search(ctx, run, q, num_results=10, category=category, include_text=True):
+        for r in _search(ctx, run, q, num_results=num, category=category, include_text=True):
             if added >= limit or from_this_query >= per_query:
                 break
             prof = parse_profile(r)
@@ -216,16 +241,42 @@ def source_engineers(ctx, run, limit: int) -> int:
             if len(surname.strip(".")) < 2 or surname.endswith("."):
                 run.skipped += 1          # "Daniel E." is too ambiguous to match evidence to
                 continue
-            if db.find_person_by_identifier(ctx.con, "linkedin", prof["url"]):
+            if db.find_person_by_identifier(ctx.con, "linkedin", prof["url"]) or \
+                    db.find_person_by_identifier(ctx.con, "exa", prof["url"]):
                 continue                  # already sourced; don't spend on evidence again
-            from_this_query += 1
+            allowed = engineer_companies(ctx)
+            if allowed and prof["company"] not in allowed:
+                run.skipped += 1          # not currently at a company we target
+                continue
             loc = us_located(prof["location_hint"])
+            if loc == 0:
+                run.skipped += 1          # currently outside the US
+                continue
+            move = None
+            if mobility.mode(ctx) != "off" and prof.get("props"):
+                move = mobility.profile_move(ctx, prof["props"], mobility.engineer_within_years(ctx))
+            if mobility.mode(ctx) == "require" and not move:
+                run.skipped += 1          # checked before any paid evidence search
+                continue
+            from_this_query += 1
             id_type = "linkedin" if "linkedin.com/in/" in prof["url"] else "exa"
             pid = resolve_person(ctx.con, [(id_type, prof["url"])], prof["name"], segment="engineer",
                                  group_source="cold", primary_employer=prof["company"],
                                  employer_domain=COMPANIES[prof["company"]], title=prof["headline"][:120],
                                  us_located=loc, country="US" if loc == 1 else None)
-            db.upsert_source_record(ctx.con, "exa_people", prof["url"], "person", prof)
+            db.upsert_source_record(ctx.con, "exa_people", prof["url"], "person",
+                                    {k: v for k, v in prof.items() if k != "props"})
+            if move:
+                mobility.record(ctx.con, pid, move, prof["url"])
+            if prof.get("title") and prof.get("since"):
+                db.add_signal(ctx.con, pid, "role", 1, prof["url"],
+                              evidence_text=f"{prof['title']} at {prof['company']} since {str(prof['since'])[:4]}",
+                              evidence_date=str(prof["since"])[:10], url=prof["url"])
+            if not ctx.settings.get("sourcing.engineer_evidence_searches", True):
+                ctx.con.commit()
+                added += 1
+                run.ok += 1
+                continue
             n = _add_evidence(ctx, run, pid, prof["name"], prof["company"], "patent",
                               f'"{prof["name"]}" patent {prof["company"]}')
             n += _add_evidence(ctx, run, pid, prof["name"], prof["company"], "talk",
@@ -237,6 +288,8 @@ def source_engineers(ctx, run, limit: int) -> int:
             ctx.con.commit()
             added += 1
             run.ok += 1
+    db.set_cursor(ctx.con, "exa_people", "engineer_query", str((start + used) % len(queries)))
+    ctx.con.commit()
     return added
 
 
