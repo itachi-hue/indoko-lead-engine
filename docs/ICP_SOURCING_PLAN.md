@@ -104,15 +104,35 @@ email still lets the reader decide whether it applies.
 
 ## 6. Cost (1,000 leads a month)
 
+Revised 2026-10-20 after M3, using measured costs.
+
+**By group:**
+
+| Group | Leads a month | Exa | Email checks |
+|---|---|---|---|
+| Engineers (13 companies) | ~600 | ~$5 (~$0.0013 per profile; ~4–5 profiles per lead; evidence searches off) | ~3,000 |
+| Researchers | ~200 | ~$5 (OpenAlex is free; Exa only for faculty pages) | ~500 |
+| Founders | ~200 | ~$30 (news articles plus one profile lookup per founder) | ~1,000 |
+| **Total** | **~1,000** | **~$40** | **~4,500** |
+
+**By item:**
+
 | Item | Monthly | Who pays |
 |---|---|---|
-| SEC Form D, PatentsView, OpenAlex | $0 | Free |
-| Exa people search, bio reading, fund portfolios, faculty pages | ~$15–50 (M1: about $0.0015 per person with full profile; ×2 for repeats and filtered-out people) | Karishma's existing Exa credits; Exa's free $10 a month covers part |
-| Reoon verification (~5,000 checks: only people who pass the immigrant filter are checked) | ~$20–60 (price to confirm) | **New** |
+| SEC Form D, PatentsView, OpenAlex, Europe PMC | $0 | Free |
+| Exa | ~$40 | Karishma's existing Exa credits |
+| Reoon (~4,500 checks) | ~$10–50 (price to confirm) | **New**; the paid plan is required, the free plan is daily |
 | Gemini drafting | ~$1–5 | Her existing account |
 | Instantly, inboxes, domains, hosting | – | Already paid |
 
-**New spend: about $20–60 a month** (about $0.02–0.06 per lead), plus $15–50 of existing Exa credits.
+**Total: about $50–100 a month (5–10 cents per lead). Only Reoon is new money.**
+
+**What could move it:**
+
+- The engineer email confirm rate (assumed ~50%, not yet measured). At 25%, add about $10–25.
+- Founders are the least tested group; their Exa cost could be off by 2×.
+
+Either way it stays under $150 a month.
 
 Sending capacity: 1,000 people plus 2 follow-ups is about 3,000 emails a month. At about 30 a day per
 inbox, that needs about **5 warmed-up inboxes**.
@@ -253,3 +273,39 @@ rejects it confirms mailboxes; a server that accepts it accepts every address.
 
 **Reoon:** the free plan is a daily allowance, not 600 to use at once. It hit zero after ~134 checks
 on 2026-10-20. Pilot volume needs the paid plan.
+
+## 15. M3 results and lessons (2026-10-20)
+
+**M3 (partial):**
+
+- Found 18 engineers who moved here, for $0.92. The run was stopped once it stalled.
+- All 18 were at Apple, because of an ordering bug: searches now cycle through every company first.
+- The extra evidence searches (patents, talks, personal site) found something for only 6 of 18, at
+  about 10× the cost. They are now off by default (`sourcing.engineer_evidence_searches = false`).
+  That cuts the cost from about $0.05 to about $0.005 per engineer.
+- The search position is now saved after every search, so a stopped run resumes where it left off.
+- Emails for the 18 are still to check. This needs Reoon credits.
+
+**Reoon usage, 134 checks:**
+
+| What | Checks |
+|---|---|
+| Wasted on catch-all servers (24 founder guesses, 24 Google/Meta/Amazon guesses) | 48 |
+| Company mail-server check (M2) | 48 |
+| Real confirmations | 14 |
+| Rejected or no answer | 24 |
+
+**What we fixed and learned:**
+
+- **Wasted checks:** guessing now stops at the first catch-all answer, and catch-all companies are
+  excluded. Each engineer now needs about 1–3 checks instead of 6.
+- **Daily allowance:** Reoon's free plan is a daily allowance, so a burst run needs the paid plan.
+
+**Status of the 37 people who passed the immigrant filter today:**
+
+- 4 have confirmed emails (researchers).
+- 18 Apple engineers are waiting for Reoon credits.
+- 15 researchers are waiting for a re-run with the paper-email finder.
+- Expected: about 15–20 of the 37 end with a confirmed email.
+
+**Full list:** `~/indoko/leads-2026-10-20.csv` (local only; it contains personal data).
