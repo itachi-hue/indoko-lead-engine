@@ -250,3 +250,33 @@ def test_catch_all_domain_stops_further_guesses(ctx, monkeypatch):
     with Run(ctx.con, "find-emails") as r:
         res = find.find_emails(ctx, r, "founder", 10, 1.0)
     assert res["found"] == 0 and v.calls == ["ada@northwind.ai"]      # one check, not three
+
+
+def test_check_domains_keeps_only_confirming_servers(ctx, monkeypatch, capsys):
+    from lead_engine import commands
+    v = StubVerifier({"zq-no-such-person-7319@apple.com": "undeliverable",
+                      "zq-no-such-person-7319@stripe.com": "catch_all"})
+    monkeypatch.setattr(verify, "build", lambda c: v)
+
+    class A:
+        only = ["Apple", "Stripe"]
+    with Run(ctx.con, "check-domains") as r:
+        commands.cmd_check_domains(ctx, A(), r)
+    out = capsys.readouterr().out
+    assert 'engineer_companies = ["Apple"]' in out and "accepts every address" in out
+
+
+def test_paper_email_from_europe_pmc(ctx, router):
+    pid = person(ctx.con, "researcher", name="Sehee Jeong")
+    db.add_identifier(ctx.con, pid, "orcid", "https://orcid.org/0000-0001-2345-6789")
+    ctx.con.commit()
+    router.add("GET", r"europepmc/webservices/rest/search\?query=AUTHORID", {"resultList": {"result": [
+        {"pmcid": "PMC111", "firstPublicationDate": "2026-04-01"}]}})
+    router.add("GET", r"rest/PMC111/fullTextXML",
+               "<article><corresp>Correspondence: <email>sehee.jeong@nyu.edu</email>, "
+               "<email>j.smith@nyu.edu</email></corresp></article>")
+    with Run(ctx.con, "x") as r:
+        got = finders.PaperEmailFinder().find(ctx, db.get_person(ctx.con, pid), r)
+    assert [c["email"] for c in got] == ["sehee.jeong@nyu.edu"]          # a co-author's address is not theirs
+    assert got[0]["source"] == "published_page" and "PMC111" in got[0]["url"]
+    assert "0000-0001-2345-6789" in str(router.calls_to("europepmc")[0].url)

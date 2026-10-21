@@ -2,6 +2,8 @@
 
 - published_page: addresses the person published on their own pages (personal site, lab page,
   talk page), read through Exa contents. No guessing.
+- paper_email: researchers' corresponding-author address in their open-access papers (Europe PMC,
+  free), found by ORCID. Recorded as published_page: the author published it.
 - hunter / prospeo / icypeas: finder APIs. Request shapes are isolated here; confirm each in M0.
 - exa_websets: disabled until Indoko's Exa credits are confirmed to include Websets.
 """
@@ -98,6 +100,41 @@ class PublishedPageFinder(Finder):
                     continue
                 if page.get("url") in own_site or name_matches(e, person["display_name"]):
                     out.append({"email": e, "source": self.name, "url": page.get("url")})
+        return out
+
+
+class PaperEmailFinder(Finder):
+    """Corresponding-author emails from a researcher's recent open-access papers (Europe PMC, free)."""
+    name = "paper_email"
+    BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
+
+    def find(self, ctx, person, run) -> list[dict]:
+        if person["segment"] != "researcher":
+            return []
+        row = ctx.con.execute("SELECT id_value FROM person_identifiers WHERE person_id=? AND id_type='orcid'",
+                              (person["person_id"],)).fetchone()
+        if not row:
+            return []
+        orcid = row["id_value"].rstrip("/").rsplit("/", 1)[-1]
+        q = urllib.parse.quote(f'AUTHORID:"{orcid}" AND OPEN_ACCESS:Y AND IN_EPMC:Y')
+        hits = http.get_json(ctx.client, f"{self.BASE}/search?query={q}&format=json&pageSize=5"
+                                         f"&sort=P_PDATE_D%20desc").get("resultList", {}).get("result", [])
+        out: list[dict] = []
+        for hit in hits[:3]:
+            pmcid = hit.get("pmcid")
+            if not pmcid:
+                continue
+            try:
+                xml = ctx.client.get(f"{self.BASE}/{pmcid}/fullTextXML", timeout=30).text
+            except httpx.HTTPError:
+                continue
+            url = f"https://europepmc.org/article/PMC/{pmcid}"
+            for e in emails_in(" ".join(re.findall(r"<email[^>]*>([^<]+)</email>", xml))):
+                if name_matches(e, person["display_name"]) and e not in {c["email"] for c in out}:
+                    out.append({"email": e, "source": "published_page", "url": url,
+                                "date": hit.get("firstPublicationDate")})
+            if out:
+                break   # newest paper with their address wins (older ones may be a previous job)
         return out
 
 
@@ -212,7 +249,7 @@ class IcypeasFinder(Finder):
 GROUP_ORDER = {
     "engineer": ["published_page", "exa_websets", "pattern_guess"],   # guesses only with work_address_ok
     "founder": ["published_page", "pattern_guess", "exa_websets", "hunter", "prospeo", "icypeas"],
-    "researcher": ["published_page", "hunter", "prospeo"],
+    "researcher": ["paper_email", "published_page", "hunter", "prospeo"],   # free first
     "creator": ["published_page"],
 }
 
@@ -225,6 +262,8 @@ def available(ctx) -> dict[str, Finder]:
         out["published_page"] = PublishedPageFinder()
     if "pattern_guess" in enabled:
         out["pattern_guess"] = FounderDomainFinder()
+    if "paper_email" in enabled:
+        out["paper_email"] = PaperEmailFinder()
     for name, cls, key in (("hunter", HunterFinder, "HUNTER_API_KEY"), ("prospeo", ProspeoFinder, "PROSPEO_API_KEY"),
                            ("icypeas", IcypeasFinder, "ICYPEAS_API_KEY")):
         if name in enabled and s.secret(key):

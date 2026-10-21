@@ -391,3 +391,39 @@ def _(p):
     p.add_argument("file", nargs="?")
     p.add_argument("--n", type=int)
     p.add_argument("--seed", type=int)
+
+
+# ---------------- which engineer employers can have guessed addresses confirmed ----------------
+@command("check-domains", "Find which engineer employers' mail servers confirm mailboxes (1 check each)")
+def cmd_check_domains(ctx, args, run):
+    from .emails import verify as verify_mod
+    from .emails.find import _verify
+    from .sources.cold import COMPANIES
+
+    skip = {"Google", "Meta", "Amazon"}
+    names = [c for c in COMPANIES if c not in skip and (not args.only or c in args.only)]
+    if ctx.dry_run:
+        print(f"[dry-run] would check {len(names)} domains with the configured verifier")
+        return 0
+    verifier = verify_mod.build(ctx)
+    if verifier is None:
+        raise RuntimeError("no email verifier configured (emails.verifier + VERIFIER_API_KEY)")
+    results = {}
+    for name in names:
+        # an address nobody has: a server that says "deliverable" or "catch_all" accepts everything
+        probe = f"zq-no-such-person-7319@{COMPANIES[name]}"
+        results[name] = _verify(ctx.con, verifier, probe, None, run)
+        ctx.con.commit()
+    good = [n for n, st in results.items() if st == "undeliverable"]
+    for n, st in sorted(results.items(), key=lambda kv: kv[1]):
+        verdict = "confirms mailboxes" if st == "undeliverable" else (
+            "accepts every address" if st in ("catch_all", "deliverable") else "no answer")
+        print(f"{n:14} {COMPANIES[n]:20} {verdict}")
+    print("\n[sourcing]\nengineer_companies = " + json.dumps(good))
+    run.ok = len(good)
+    return 0
+
+
+@configure("check-domains")
+def _(p):
+    p.add_argument("--only", nargs="*", help="company names to check (default: all except Google, Meta, Amazon)")
