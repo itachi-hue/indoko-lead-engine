@@ -107,12 +107,12 @@ email still lets the reader decide whether it applies.
 | Item | Monthly | Who pays |
 |---|---|---|
 | SEC Form D, PatentsView, OpenAlex | $0 | Free |
-| Exa people search, bio reading, fund portfolios | ~$60–150 (M1: about $0.0015 per person with full profile) | Karishma's existing Exa credits |
-| Reoon verification (~8,000–10,000 checks) | ~$40–80 | **New** |
+| Exa people search, bio reading, fund portfolios, faculty pages | ~$15–50 (M1: about $0.0015 per person with full profile; ×2 for repeats and filtered-out people) | Karishma's existing Exa credits; Exa's free $10 a month covers part |
+| Reoon verification (~5,000 checks: only people who pass the immigrant filter are checked) | ~$20–60 (price to confirm) | **New** |
 | Gemini drafting | ~$1–5 | Her existing account |
 | Instantly, inboxes, domains, hosting | – | Already paid |
 
-**New spend: about $40–80 a month.**
+**New spend: about $20–60 a month** (about $0.02–0.06 per lead), plus $15–50 of existing Exa credits.
 
 Sending capacity: 1,000 people plus 2 follow-ups is about 3,000 emails a month. At about 30 a day per
 inbox, that needs about **5 warmed-up inboxes**.
