@@ -14,6 +14,7 @@ from collections import defaultdict
 
 from .. import db, http
 from ..identity import resolve_person
+from . import mobility
 from .cold import COMPANIES, engineer_companies
 
 log = logging.getLogger("lead_engine.patents")
@@ -36,6 +37,24 @@ def query(ctx, company: str, since: str, size: int = 100) -> list[dict]:
             "f": FIELDS, "o": {"size": size}, "s": [{"patent_date": "desc"}]}
     data = http.post_json(ctx.client, ENDPOINT, body, headers={"X-Api-Key": key})
     return data.get("patents") or []
+
+
+def inventor_history(ctx, first: str, last: str) -> list[dict]:
+    """Every patent filed under this inventor name, oldest first: [{date, country, city}]."""
+    key = ctx.settings.secret("PATENTSVIEW_API_KEY")
+    body = {"q": {"_and": [{"inventors.inventor_name_first": first}, {"inventors.inventor_name_last": last}]},
+            "f": ["patent_date", "inventors.inventor_name_first", "inventors.inventor_name_last",
+                  "inventors.inventor_city", "inventors.inventor_country"],
+            "o": {"size": 100}, "s": [{"patent_date": "asc"}]}
+    data = http.post_json(ctx.client, ENDPOINT, body, headers={"X-Api-Key": key})
+    out = []
+    for pat in data.get("patents") or []:
+        for inv in pat.get("inventors") or []:
+            if (inv.get("inventor_name_first") or "").strip().lower() == first.lower() and \
+                    (inv.get("inventor_name_last") or "").strip().lower() == last.lower():
+                out.append({"date": pat.get("patent_date"), "country": inv.get("inventor_country"),
+                            "city": inv.get("inventor_city")})
+    return out
 
 
 def inventors_from(patents: list[dict], company: str, min_patents: int = 2) -> list[dict]:
@@ -83,7 +102,7 @@ def source(ctx, run, limit: int, months_back: int = 18) -> int:
         if added >= limit:
             break
         try:
-            patents = query(ctx, company, since)
+            patents = query(ctx, company, since, size=1000 if mobility.mode(ctx) == "require" else 100)
         except http.HTTPError as exc:
             run.note(f"PatentsView {company}: HTTP {exc.status}")
             run.failed += 1
@@ -94,7 +113,19 @@ def source(ctx, run, limit: int, months_back: int = 18) -> int:
                 break
             if db.find_person_by_identifier(ctx.con, "inventor_key", f"{inv['name'].lower()}|{company.lower()}"):
                 continue
-            ingest(ctx, inv)
+            move = None
+            if mobility.mode(ctx) != "off":
+                first, last = inv["name"].split(" ", 1)
+                try:
+                    move = mobility.inventor_move(inventor_history(ctx, first, last), mobility.within_years(ctx))
+                except http.HTTPError as exc:
+                    run.note(f"PatentsView history {inv['name']}: HTTP {exc.status}")
+                if mobility.mode(ctx) == "require" and not move:
+                    run.skipped += 1
+                    continue
+            pid = ingest(ctx, inv)
+            if move:
+                mobility.record(ctx.con, pid, move, f"https://patents.google.com/?inventor={inv['name']}")
             taken += 1
             added += 1
             run.ok += 1

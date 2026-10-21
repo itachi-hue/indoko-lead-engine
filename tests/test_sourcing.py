@@ -134,6 +134,7 @@ def test_source_creators(sctx):
 
 # ---------------- researchers ----------------
 def test_source_researchers(ctx, router):
+    ctx.settings.data.setdefault("sourcing", {})["moved_to_us"] = "off"
     router.add("GET", r"api.openalex.org/authors\?filter=last_known_institutions.country_code:US", {
         "results": [
             {"id": "https://openalex.org/A1", "display_name": "Grace Hopper", "orcid": None,

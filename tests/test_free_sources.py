@@ -87,6 +87,7 @@ def _pat(pid, title, date, inventors):
 
 def test_patents_grouping_and_ingest(ctx, router):
     ctx.settings.secrets["PATENTSVIEW_API_KEY"] = "k"
+    ctx.settings.data.setdefault("sourcing", {})["moved_to_us"] = "off"
     pats = [_pat("12000001", "Distributed cache invalidation", "2026-05-01",
                  [("Ada", "Lovelace", "Mountain View", "CA", "US"), ("Hans", "Zimmer", "Zurich", None, "CH")]),
             _pat("12000002", "Low-latency RPC routing", "2026-07-01", [("Ada", "Lovelace", "Mountain View", "CA", "US")]),

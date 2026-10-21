@@ -10,6 +10,7 @@ import urllib.parse
 
 from .. import db, http
 from ..identity import resolve_person
+from . import mobility
 
 log = logging.getLogger("lead_engine.researchers")
 BASE = "https://api.openalex.org"
@@ -71,6 +72,8 @@ def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
     lki = (a.get("last_known_institutions") or [{}])[0] or {}
     if lki.get("country_code") != "US":
         return None
+    if (lki.get("type") or "").lower() == "government":
+        return None  # federal and state agencies: most of these jobs require citizenship
     oa = a["id"].rsplit("/", 1)[-1]
     ids = [("openalex", oa)]
     if a.get("orcid"):
@@ -87,6 +90,9 @@ def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
                   evidence_text=f"{a.get('cited_by_count', 0):,} citations across {a.get('works_count', 0)} papers",
                   url=prov)
     db.add_signal(con, pid, "works_count", a.get("works_count", 0), prov)
+    move = mobility.researcher_move(a, mobility.within_years(ctx))
+    if move and mobility.mode(ctx) != "off":
+        mobility.record(con, pid, move, prov)
     recent3 = recent_works_3y(a)
     db.add_signal(con, pid, "recent_works_3y", recent3, prov)
     for w in works:
@@ -103,12 +109,16 @@ def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
 
 
 def source(ctx, run, limit: int, field: str | None = None) -> int:
-    authors = search_authors(ctx, limit * 2, field)
+    require = mobility.mode(ctx) == "require"
+    authors = search_authors(ctx, limit * (8 if require else 2), field)   # most careers start in the US
     added = 0
     for a in authors:
         if added >= limit:
             break
         if recent_works_3y(a) < MIN_RECENT_WORKS:
+            run.skipped += 1
+            continue
+        if require and not mobility.researcher_move(a, mobility.within_years(ctx)):
             run.skipped += 1
             continue
         try:
