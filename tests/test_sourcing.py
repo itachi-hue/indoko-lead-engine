@@ -88,7 +88,7 @@ def test_source_engineers_with_evidence(sctx):
          "text": "Seattle"},                                       # not senior -> skipped
     ])
     sctx.settings.data["sourcing"] = {"queries": {"engineer": ["staff software engineer at Google"]},
-                                      "moved_to_us": "off"}
+                                      "moved_to_us": "off", "engineer_evidence_searches": True}
     with Run(sctx.con, "source") as r:
         n = cold.source(sctx, r, "engineer", 5, via="exa")
     assert n == 1 and r.skipped == 1 and r.cost_usd > 0

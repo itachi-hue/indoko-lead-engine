@@ -47,9 +47,9 @@ ENGINEER_LEVELS = ("staff software engineer", "principal software engineer", "se
 ENGINEER_PLACES = ("in the United States", "in the San Francisco Bay Area", "in Seattle", "in New York",
                    "in Austin, Texas")
 DEFAULT_QUERIES = {
-    # place-major order: one pass over every company and level before repeating with a new place
-    "engineer": [f"{lvl} at {c} {place}" for place in ENGINEER_PLACES for c in COMPANIES
-                 for lvl in ENGINEER_LEVELS],
+    # company varies fastest: each round touches every company before repeating a level or place
+    "engineer": [f"{lvl} at {c} {place}" for place in ENGINEER_PLACES for lvl in ENGINEER_LEVELS
+                 for c in COMPANIES],
     "founder": ["startup raises seed round", "startup raises Series A", "Y Combinator startup raises funding",
                 "founders announce funding round for AI startup"],
     # US-focused: generic "festival award" searches returned only UK/Iran/Greece/Philippines winners (live, Oct 2026)
@@ -229,6 +229,7 @@ def source_engineers(ctx, run, limit: int) -> int:
         if added >= limit:
             break
         used += 1
+        db.set_cursor(ctx.con, "exa_people", "engineer_query", str((start + used) % len(queries)))
         from_this_query = 0
         for r in _search(ctx, run, q, num_results=num, category=category, include_text=True):
             if added >= limit or from_this_query >= per_query:
@@ -272,7 +273,9 @@ def source_engineers(ctx, run, limit: int) -> int:
                 db.add_signal(ctx.con, pid, "role", 1, prof["url"],
                               evidence_text=f"{prof['title']} at {prof['company']} since {str(prof['since'])[:4]}",
                               evidence_date=str(prof["since"])[:10], url=prof["url"])
-            if not ctx.settings.get("sourcing.engineer_evidence_searches", True):
+            # off by default: in the live run (Oct 2026) the extra searches found evidence for 6 of 18
+            # people at ~10x the cost; the profile's role and history are enough to personalize
+            if not ctx.settings.get("sourcing.engineer_evidence_searches", False):
                 ctx.con.commit()
                 added += 1
                 run.ok += 1
