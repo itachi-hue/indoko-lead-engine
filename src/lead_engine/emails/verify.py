@@ -48,6 +48,25 @@ class ZeroBounce(Verifier):
                 }.get(res, "unknown")
 
 
+class Reoon(Verifier):
+    """Reoon power mode (SMTP mailbox check + catch-all detection). Free plan: ~600 checks a month."""
+    name, cost_usd = "reoon", 0.0
+
+    def __init__(self, client: httpx.Client, key: str):
+        self.client, self.key = client, key
+
+    def verify(self, email: str) -> str:
+        url = (f"https://emailverifier.reoon.com/api/v1/verify?email={urllib.parse.quote(email)}"
+               f"&key={self.key}&mode=power")
+        data = http.get_json(self.client, url)
+        if data.get("is_catch_all"):
+            return "catch_all"
+        res = (data.get("status") or "").lower()
+        return {"safe": "deliverable", "catch_all": "catch_all", "invalid": "undeliverable",
+                "disabled": "undeliverable", "disposable": "undeliverable", "spamtrap": "undeliverable"
+                }.get(res, "unknown")
+
+
 class Reacher(Verifier):
     name, cost_usd = "reacher", 0.0
 
@@ -67,6 +86,8 @@ def build(ctx) -> Verifier | None:
         return MillionVerifier(ctx.client, key)
     if name == "zerobounce" and key:
         return ZeroBounce(ctx.client, key)
+    if name == "reoon" and key:
+        return Reoon(ctx.client, key)
     if name.startswith("reacher"):
         return Reacher(ctx.client, ctx.settings.get("emails.reacher_url", "http://localhost:8080"))
     return None

@@ -154,9 +154,14 @@ def test_no_verifier_refuses(ctx, monkeypatch):
     (verify.MillionVerifier, {"result": "invalid"}, "undeliverable"),
     (verify.ZeroBounce, {"status": "valid"}, "deliverable"),
     (verify.ZeroBounce, {"status": "unknown"}, "unknown"),
+    (verify.Reoon, {"status": "safe", "is_catch_all": False}, "deliverable"),
+    (verify.Reoon, {"status": "safe", "is_catch_all": True}, "catch_all"),
+    (verify.Reoon, {"status": "catch_all"}, "catch_all"),
+    (verify.Reoon, {"status": "disabled"}, "undeliverable"),
+    (verify.Reoon, {"status": "inbox_full"}, "unknown"),
 ])
 def test_verifier_mapping(router, ctx, cls, payload, expected):
-    router.add("GET", r"millionverifier|zerobounce", payload)
+    router.add("GET", r"millionverifier|zerobounce|reoon", payload)
     assert cls(ctx.client, "k").verify("a@b.co") == expected
 
 
