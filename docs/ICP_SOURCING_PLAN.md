@@ -1,6 +1,6 @@
 # ICP sourcing plan: 1,000 immigrant leads a month
 
-Status: draft, 2026-10-20. Companion to [DESIGN.md](DESIGN.md); this plan covers *who* we find and how,
+Status: draft, 2026-10-20. Updated the same day with M1 results (Exa engineer test). Companion to [DESIGN.md](DESIGN.md); this plan covers *who* we find and how,
 DESIGN.md covers how the pipeline runs.
 
 ## 1. Goal
@@ -30,7 +30,7 @@ Out of scope: federal and state employees (most of those jobs require citizenshi
 
 | Group | Leads a month | Found a month | Pass immigrant filter | Confirmed email |
 |---|---|---|---|---|
-| Engineers | ~500 | ~3,500 | ~35% | ~40% |
+| Engineers | ~500 | ~2,000 | ~50–65% (M1: 13 of 20) | ~40% |
 | Founders | ~300 | ~2,000 | ~25% | ~50%* |
 | Researchers | ~200 | ~3,000 | ~7% | ~40%** |
 | **Total** | **~1,000** | | | |
@@ -39,6 +39,15 @@ Out of scope: federal and state employees (most of those jobs require citizenshi
 \*\* Researchers: about 20% today; about 40% expected once we use the email on their papers (M5).
 
 Every rate is an estimate until the tests in section 8 measure it. Each milestone re-checks it.
+
+Odds of reaching 1,000 a month: about 75–80% after M1 (was 50/50). What's still unproven:
+
+- the email confirm rate at engineer companies beyond Apple and Microsoft (M2);
+- whether Exa yields about 2,000 *distinct* engineers a month (M3);
+- the founder filter (M4);
+- inbox warm-up time.
+
+Expected outcome at 1–3% positive replies: about 10–30 conversations a month.
 
 ## 4. Immigrant filter
 
@@ -50,7 +59,7 @@ photos.
 |---|---|---|---|
 | Career started abroad, first US institution within 10 years | OpenAlex affiliation history (free) | Researchers | Built: about 1 in 15 researchers |
 | Older patents filed from abroad, recent ones from the US | PatentsView inventor addresses (free) | Engineers | Built, untested live; low recall, because most immigrants came as students |
-| First degree from a university outside the US, now working in the US | Exa people search (education history) | Engineers, founders | **To test (M1)**: expected to be the main engine |
+| First school or first job outside the US, now working in the US | Exa people search: `educationHistory` (school; country looked up free in OpenAlex institutions) and `workHistory` (job locations and dates) | Engineers, founders | **M1 passed**: 13 of 20 engineers. **Main engine** |
 | Bio says they studied or worked abroad before coming to the US | Exa reading founder bios and company pages | Founders | To build (M4) |
 | Backed by a fund or program for immigrant founders | Portfolio pages (e.g. Unshackled Ventures) | Founders | To build (M4) |
 | Posted about their own O-1, EB-1A or green-card process | Exa search | Anyone | To build (M6); small but high intent |
@@ -63,7 +72,9 @@ photos.
   enforces this.
 - Config (`[sourcing]`):
   - `moved_to_us = "require" | "prefer" | "off"`
-  - `moved_within_years = 10`
+  - `moved_within_years = 10` for researchers
+  - **15 years for engineers**: Indian and Chinese engineers who came around 2010–2015 are often still
+    in green-card backlogs, which is exactly where EB-1A or NIW helps.
 
 **A move is a signal, not proof.** Someone who moved in 2017 may already hold a green card, so the
 email still lets the reader decide whether it applies.
@@ -96,7 +107,7 @@ email still lets the reader decide whether it applies.
 | Item | Monthly | Who pays |
 |---|---|---|
 | SEC Form D, PatentsView, OpenAlex | $0 | Free |
-| Exa people search, bio reading, fund portfolios | ~$150–250 | Karishma's existing Exa credits |
+| Exa people search, bio reading, fund portfolios | ~$60–150 (M1: about $0.0015 per person with full profile) | Karishma's existing Exa credits |
 | Reoon verification (~8,000–10,000 checks) | ~$40–80 | **New** |
 | Gemini drafting | ~$1–5 | Her existing account |
 | Instantly, inboxes, domains, hosting | – | Already paid |
@@ -123,9 +134,9 @@ credits unless noted.
 
 | # | What | Needs | Spend | Gate |
 |---|---|---|---|---|
-| **M1** | Exa people search on 20 Microsoft and Apple engineers: does it return education history, and what share studied abroad? | – | ~$1 | Education returned for ≥70% of people, and studied-abroad share ≥20%. Otherwise engineers fall back to patents and the target drops |
+| **M1** ✅ | Exa people search on 20 Microsoft and Apple engineers: does it return education history, and what share studied abroad? | – | ~$0.03 | **Passed:** education returned for 20 of 20; 13 of 20 studied or worked abroad first (7 first came to the US in 2018 or later) |
 | **M2** | Check 50 mid-size tech companies for catch-all mail servers; keep the ones that confirm mailboxes | – | ~50 Reoon checks | ≥20 usable companies |
-| **M3** | Engineer source: Exa people search + education filter across the M2 companies; 100 engineers end to end | M1 pass | ~$3–5 | ≥30 leads from 100 |
+| **M3** | Engineer source: Exa people search + education and job-location filter across the M2 companies; 100 engineers end to end | M1 pass ✅ | ~$1 | ≥30 leads from 100 |
 | **M4** | Founders: SEC Form D live; immigrant signal from bios and immigrant-founder fund portfolios; 100 founders end to end | SEC contact email | ~$3–5 | ≥20 leads from 100 |
 | **M5** | Researchers: corresponding-author emails from papers; 200 movers | – | $0 | Email rate ≥35% |
 | **M6** | People posting about their own visa process: 20 people | – | ~$1 | ≥5 usable leads |
@@ -152,7 +163,9 @@ the levers in order are:
 
 | Risk | Mitigation |
 |---|---|
-| Exa people results don't include education | M1 tests it first; fallback is patents plus bios |
+| Exa people results don't include education | Resolved by M1: 20 of 20 returned education and job history |
+| Exa returns people who no longer work at the searched company (M1: 6 of 20) | Check the current employer from `workHistory` (the entry with no end date) |
+| Vague job locations ("Hybrid", a city with no country) and schools with no country in OpenAlex | Better location matching, a list of US cities, and a fallback lookup of the school's country; never guess from names |
 | Merged OpenAlex profiles (two people as one) | Foreign-domain rule; human review of each draft in the Review tab |
 | Work addresses get lower replies, and employer IT can see the email | Prefer personal published addresses where found; measure replies by address type |
 | Mid-size companies turn catch-all | Re-check the company list monthly (M2 script) |
@@ -167,3 +180,28 @@ the levers in order are:
 | Gemini key + Google service account with Sheet access | M8 | Waiting |
 | Reoon paid plan | When monthly checks pass ~600 | Later |
 | Rotate the Reoon and Exa keys (both were pasted in chat) | Security | Not done |
+
+## 12. M1 results (2026-10-20)
+
+**Test:** two Exa people searches ("staff software engineer at Microsoft", "principal software engineer
+at Apple"), 10 results each. Cost about $0.03.
+
+**What came back:** each result carries a person entity with:
+
+- `workHistory`: title, company, city and country, start and end dates;
+- `educationHistory`: school, degree, dates. No country, so we look the school up in OpenAlex.
+
+**Results:**
+
+| Measure | Result |
+|---|---|
+| Education history present | 20 of 20 |
+| First school or first job outside the US | 13 of 20 (65%) |
+| …of those, first US job in 2018 or later | 7 |
+| …first US job 2009–2015 | 4 |
+| Currently at the searched company | 14 of 20; the others were at Stripe, Shopify, GitHub and others |
+
+**Countries seen:** India, Romania, Russia, Iran, Egypt, Sri Lanka and Belarus.
+
+**Caveat:** the sample was small. The rate at scale is probably lower than 65%, but it has a wide margin
+over the 20% gate.
