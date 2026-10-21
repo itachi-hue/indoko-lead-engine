@@ -238,3 +238,15 @@ def test_domain_needs_company_specific_word(ctx, router):
     kws = ["kodama", "logging", "skidders", "forestry", "intelligent", "operators"]
     assert domains.company_domain(ctx.client, "Kodama", kws) == "kodama.ai"
     assert domains.company_domain(ctx.client, "Kodama", ["intelligent"]) is None      # one shared word is not enough
+
+
+def test_catch_all_domain_stops_further_guesses(ctx, monkeypatch):
+    person(ctx.con, "founder", employer_domain="northwind.ai")
+    ctx.con.commit()
+    v = StubVerifier({"ada@northwind.ai": "catch_all"})
+    monkeypatch.setattr(verify, "build", lambda c: v)
+    guess = StubFinder("pattern_guess", ["ada@northwind.ai", "ada.lovelace@northwind.ai", "alovelace@northwind.ai"])
+    monkeypatch.setattr(finders, "available", lambda c: {"pattern_guess": guess})
+    with Run(ctx.con, "find-emails") as r:
+        res = find.find_emails(ctx, r, "founder", 10, 1.0)
+    assert res["found"] == 0 and v.calls == ["ada@northwind.ai"]      # one check, not three

@@ -91,6 +91,8 @@ def find_for_person(ctx, person, run, verifier, avail: dict, budget_left) -> str
             ok, why = policy.acceptable(person, email, c["source"], status)
             if not ok:
                 log.info("rejected candidate for %s: %s", person["person_id"], why)
+                if c["source"] == "pattern_guess" and status == "catch_all":
+                    break  # the server accepts every address: no other guess on this domain can be confirmed
                 continue
             if db.add_identifier(con, person["person_id"], "email", email, "found") == "conflict":
                 continue  # this address belongs to someone else on file
