@@ -117,3 +117,10 @@ def test_free_sources_are_the_default(ctx, monkeypatch):
         cold.source(ctx, r, "founder", 1)
         cold.source(ctx, r, "engineer", 1)
     assert called == ["formd", "patents"]
+
+
+def test_engineer_companies_setting_limits_sources(ctx):
+    from lead_engine.sources import cold
+    ctx.settings.data.setdefault("sourcing", {})["engineer_companies"] = ["Apple", "Microsoft"]
+    qs = cold._queries(ctx, "engineer")
+    assert qs and all(" at Apple " in q or " at Microsoft " in q for q in qs)

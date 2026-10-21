@@ -80,5 +80,8 @@ age_recipient = ""              # age public key (age1...); the private key live
 
 [sourcing]
 people_category = "people"      # Exa category for people search
+# Engineers only from these employers (empty = all). Google, Meta and Amazon are left out: their mail
+# servers accept every address, so a guessed work address can't be confirmed.
+engineer_companies = ["Apple", "Microsoft", "NVIDIA", "Netflix"]
 # [sourcing.queries]            # optional overrides of the default search queries per group
 # engineer = ["staff software engineer at Google in the United States"]

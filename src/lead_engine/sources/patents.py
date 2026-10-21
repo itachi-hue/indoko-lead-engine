@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from .. import db, http
 from ..identity import resolve_person
-from .cold import COMPANIES
+from .cold import COMPANIES, engineer_companies
 
 log = logging.getLogger("lead_engine.patents")
 ENDPOINT = "https://search.patentsview.org/api/v1/patent/"
@@ -76,7 +76,7 @@ def ingest(ctx, inv: dict) -> str:
 
 def source(ctx, run, limit: int, months_back: int = 18) -> int:
     since = (dt.date.today() - dt.timedelta(days=30 * months_back)).isoformat()
-    companies = list(ASSIGNEE_MATCH)
+    companies = [c for c in ASSIGNEE_MATCH if c in (engineer_companies(ctx) or ASSIGNEE_MATCH)]
     per_company = max(1, -(-limit // len(companies)))
     added = 0
     for company in companies:

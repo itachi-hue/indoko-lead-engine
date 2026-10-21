@@ -45,7 +45,17 @@ SENIOR_TITLE = re.compile(r"\b(staff|principal|distinguished|senior staff|fellow
 
 
 def _queries(ctx, group: str) -> list[str]:
-    return list(ctx.settings.get(f"sourcing.queries.{group}", []) or DEFAULT_QUERIES[group])
+    custom = ctx.settings.get(f"sourcing.queries.{group}", [])
+    if custom:
+        return list(custom)
+    only = engineer_companies(ctx) if group == "engineer" else None
+    return [q for q in DEFAULT_QUERIES[group] if not only or any(f" at {c} " in q for c in only)]
+
+
+def engineer_companies(ctx) -> list[str]:
+    """sourcing.engineer_companies: which employers to source engineers from (empty = all defaults).
+    Prefer companies whose mail servers confirm mailboxes, so guessed work addresses can be verified."""
+    return list(ctx.settings.get("sourcing.engineer_companies", []) or [])
 
 
 def _search(ctx, run, query: str, **kw) -> list[dict]:
