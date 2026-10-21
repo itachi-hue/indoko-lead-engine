@@ -64,7 +64,8 @@ def _prefilter(con, person, c) -> str | None:
             and not finders.name_matches(email, person["display_name"]) \
             and not finders.first_name_at(email, person["display_name"], company_dom):
         return None  # on shared pages (staff lists) only an address carrying their name counts
-    if policy.violates_engineer_rule(person, email) or suppression.is_role_address(email):
+    if policy.violates_engineer_rule(person, email) or suppression.is_role_address(email) \
+            or policy.foreign_domain(email):
         return None
     ok, _ = policy.acceptable(person, email, c["source"], "deliverable")   # source rules only
     return email if ok else None

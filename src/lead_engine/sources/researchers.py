@@ -29,7 +29,8 @@ def _mailto(settings) -> str:
 
 
 def search_authors(ctx, limit: int, field: str | None = None, min_h: int = 8, max_h: int = 45,
-                   min_works: int = 10, min_cites: int = 500, max_cites: int = 20000) -> list[dict]:
+                   min_works: int = 10, min_cites: int = 500, max_cites: int = 20000,
+                   seed_offset: int = 0) -> list[dict]:
     """US-affiliated authors with a real record but not already famous.
 
     Live test (Oct 2026) showed why each filter is needed: sorting by citations alone returned
@@ -41,7 +42,7 @@ def search_authors(ctx, limit: int, field: str | None = None, min_h: int = 8, ma
         filters.append(f"topics.field.id:{FIELDS.get(field, field)}")
     # A seeded random sample spreads results across the whole citation window; sorting by citations
     # bunched every result just under the cap. Same seed -> same people (reproducible).
-    seed = int(ctx.settings.get("sourcing.researcher_seed", 42))
+    seed = int(ctx.settings.get("sourcing.researcher_seed", 42)) + seed_offset
     url = (f"{BASE}/authors?filter={','.join(filters)}&sample={min(limit, 200)}&seed={seed}"
            f"&per_page={min(limit, 200)}{_mailto(ctx.settings)}")
     out = http.get_json(ctx.client, url).get("results", [])
@@ -110,11 +111,26 @@ def ingest_author(ctx, a: dict, works: list[dict]) -> str | None:
 
 def source(ctx, run, limit: int, field: str | None = None) -> int:
     require = mobility.mode(ctx) == "require"
-    authors = search_authors(ctx, limit * (8 if require else 2), field)   # most careers start in the US
-    added = 0
-    for a in authors:
+    # about 1 in 15 careers started abroad and moved here recently, so keep drawing fresh samples
+    rounds = int(ctx.settings.get("sourcing.researcher_max_rounds", 15)) if require else 1
+    added, seen = 0, set()
+    for rnd in range(rounds):
         if added >= limit:
             break
+        added += _ingest_batch(ctx, run, search_authors(ctx, 200 if require else limit * 2, field,
+                                                        seed_offset=rnd), limit - added, require, seen)
+    ctx.con.commit()
+    return added
+
+
+def _ingest_batch(ctx, run, authors, want: int, require: bool, seen: set) -> int:
+    added = 0
+    for a in authors:
+        if added >= want:
+            break
+        if a["id"] in seen:
+            continue
+        seen.add(a["id"])
         if recent_works_3y(a) < MIN_RECENT_WORKS:
             run.skipped += 1
             continue
@@ -129,5 +145,4 @@ def source(ctx, run, limit: int, field: str | None = None) -> int:
         except http.HTTPError as exc:
             run.failed += 1
             log.warning("openalex author %s failed: HTTP %s", a.get("id"), exc.status)
-    ctx.con.commit()
     return added

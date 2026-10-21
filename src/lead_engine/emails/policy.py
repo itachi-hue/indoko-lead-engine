@@ -29,6 +29,21 @@ def configure(settings) -> None:
     ENGINEER_WORK_OK = (settings.get("emails.engineer_policy") or "") == "work_address_ok"
 
 
+# Country domains that signal a recipient outside the US (recipients must be US-based). Startup-style
+# country domains (.io, .ai, .co, .me ...) are deliberately not listed.
+FOREIGN_TLDS = {"cn", "de", "uk", "fr", "jp", "kr", "in", "it", "es", "nl", "se", "ch", "au", "ca", "br",
+                "ru", "ir", "tw", "hk", "sg", "il", "be", "dk", "fi", "no", "pl", "pt", "at", "cz", "gr",
+                "tr", "mx", "ar", "cl", "nz", "za", "my", "th", "vn", "id", "ph", "pk", "eg", "sa", "ae",
+                "ie", "hu", "ro", "ua", "by", "bd", "lk", "ng", "ke", "co.uk"}
+
+
+def foreign_domain(email: str) -> bool:
+    dom = suppression.domain_of(email)
+    parts = dom.split(".")
+    return parts[-1] in FOREIGN_TLDS or any(p in ("ac", "edu", "gov") and i < len(parts) - 1 and i > 0
+                                            for i, p in enumerate(parts[:-1]))
+
+
 def _employer_domains(person) -> set[str]:
     keys = person.keys() if hasattr(person, "keys") else person
     out = set()
@@ -57,6 +72,8 @@ def acceptable(person, email: str, source: str, verification: str) -> tuple[bool
     """
     if suppression.is_role_address(email):
         return False, "role address"
+    if foreign_domain(email):
+        return False, "address outside the US"
     if violates_engineer_rule(person, email):
         return False, "engineer at a corporate domain"
     engineer_sources = ("published_page", "exa_websets") + (("pattern_guess",) if ENGINEER_WORK_OK else ())

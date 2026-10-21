@@ -230,3 +230,11 @@ def test_engineer_guesses_skip_first_name_only(ctx, monkeypatch):
     got = [c["email"] for c in finders.FounderDomainFinder().find(ctx, db.get_person(ctx.con, pid), None)]
     assert got and "elliott.harris@apple.com" in got
     assert "elliott@apple.com" not in got and "eharris@apple.com" not in got
+
+
+
+def test_foreign_domains_rejected():
+    for e in ("li@wfxy.neu.edu.cn", "a@ox.ac.uk", "b@tum.de", "c@iitb.ac.in", "d@x.gov.au"):
+        assert policy.foreign_domain(e), e
+    for e in ("a@kodama.ai", "b@stripe.io", "c@ucdavis.edu", "d@noaa.gov", "e@electricplant.co", "f@gmail.com"):
+        assert not policy.foreign_domain(e), e
