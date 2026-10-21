@@ -115,8 +115,12 @@ class FounderDomainFinder(Finder):
             dom = person["employer_domain"]
             if not policy.ENGINEER_WORK_OK or not dom:
                 return []
+            # at a big company, ada@ or alovelace@ is likely someone else: only full first AND last name
+            parts = [w.lower() for w in re.sub(r"[’'`]", "", person["display_name"]).split()]
+            first, last = parts[0], parts[-1]
             return [{"email": e, "source": self.name, "url": f"https://{dom}"}
-                    for e in domains.pattern_candidates(person["display_name"], dom)]
+                    for e in domains.pattern_candidates(person["display_name"], dom)
+                    if first in e.split("@")[0] and last in e.split("@")[0]]
         if person["segment"] != "founder" or not person["primary_employer"]:
             return []
         dom = person["employer_domain"]

@@ -221,3 +221,12 @@ def test_footer_and_tone():
     assert not checks.check_tone(["I hope this email finds you well"])[0]
     assert not checks.check_tone(["Your amazing work"])[0]
     assert checks.check_tone(["Saw the round."])[0]
+
+
+def test_engineer_guesses_skip_first_name_only(ctx, monkeypatch):
+    from lead_engine.emails import finders
+    monkeypatch.setattr(policy, "ENGINEER_WORK_OK", True)
+    pid = make_person(ctx.con, name="Elliott Harris", segment="engineer", employer_domain="apple.com")
+    got = [c["email"] for c in finders.FounderDomainFinder().find(ctx, db.get_person(ctx.con, pid), None)]
+    assert got and "elliott.harris@apple.com" in got
+    assert "elliott@apple.com" not in got and "eharris@apple.com" not in got
