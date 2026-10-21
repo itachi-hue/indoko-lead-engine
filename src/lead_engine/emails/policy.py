@@ -50,6 +50,11 @@ def acceptable(person, email: str, source: str, verification: str) -> tuple[bool
         return False, "engineers: only addresses they published, or Websets"
     if person["segment"] == "creator" and source != "published_page":
         return False, "creators: only a contact published on their own site"
+    if source == "pattern_guess":
+        if person["segment"] != "founder":
+            return False, "address guessing is for founders only"
+        # a guess must be confirmed as a real mailbox; catch-all servers accept anything, so not enough
+        return (verification == "deliverable"), f"guess verification: {verification}"
     if verification == "deliverable" or verification == "on_file":
         return True, "ok"
     if verification == "catch_all" and source == "published_page":

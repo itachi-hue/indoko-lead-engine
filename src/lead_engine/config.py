@@ -46,7 +46,7 @@ DEFAULTS: dict = {
         "verifier": "",
         "budget_usd_per_run": 10.0,
         "engineer_policy": "published_personal_only",
-        "providers": ["published_page", "exa_websets", "hunter", "prospeo", "icypeas"],
+        "providers": ["published_page", "pattern_guess", "exa_websets", "hunter", "prospeo", "icypeas"],
     },
     "instantly": {
         "mode": "auto",

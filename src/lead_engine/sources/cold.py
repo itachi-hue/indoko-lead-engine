@@ -287,7 +287,8 @@ def _ingest_founder(ctx, run, art: dict, raw: dict, room: int) -> int:
                       evidence_text=fact, evidence_date=(art.get("publishedDate") or "")[:10] or None,
                       url=art.get("url"))
         db.upsert_source_record(ctx.con, "exa_news", art.get("url", ""), "article",
-                                {"title": art.get("title"), "url": art.get("url"), "record": rec})
+                                {"title": art.get("title"), "url": art.get("url"), "record": rec,
+                                 "excerpt": text[:4000]})   # used later to confirm the company's website
         added += 1
     return added
 

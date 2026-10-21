@@ -59,8 +59,10 @@ def _prefilter(con, person, c) -> str | None:
     email = suppression.normalize_email(c.get("email"))
     if not email or suppression.is_suppressed(con, email):
         return None
+    company_dom = person["employer_domain"] if person["segment"] == "founder" else None
     if c.get("source") == "published_page" and c.get("url") not in _own_sites(con, person["person_id"]) \
-            and not finders.name_matches(email, person["display_name"]):
+            and not finders.name_matches(email, person["display_name"]) \
+            and not finders.first_name_at(email, person["display_name"], company_dom):
         return None  # on shared pages (staff lists) only an address carrying their name counts
     if policy.violates_engineer_rule(person, email) or suppression.is_role_address(email):
         return None

@@ -13,7 +13,7 @@ import urllib.parse
 import httpx
 
 from .. import db, http, suppression
-from ..sources.exa import CONTENTS_COST_USD, SEARCH_COST_USD
+from ..sources.exa import SEARCH_COST_USD
 
 EMAIL_IN_TEXT = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 OBFUSCATED = re.compile(
@@ -34,6 +34,14 @@ def emails_in(text: str) -> list[str]:
         if n and not any(x in n for x in NOISE) and n not in out:
             out.append(n)
     return out
+
+
+def first_name_at(email: str, display_name: str, domain: str | None) -> bool:
+    """first@company: normal for founders, but only trusted on the person's own company domain."""
+    parts = [p.lower() for p in re.findall(r"[A-Za-z]+", display_name or "")]
+    if not parts or not domain:
+        return False
+    return email.lower() == f"{parts[0]}@{domain.lower()}"
 
 
 def name_matches(email: str, display_name: str) -> bool:
@@ -71,8 +79,12 @@ class PublishedPageFinder(Finder):
         urls = list(dict.fromkeys(u for u in urls if u))[:4]
         if not urls:
             return []
-        pages = ctx.exa.contents(urls)
-        run.cost_usd += CONTENTS_COST_USD * len(urls)
+        from .domains import page_text
+        pages = []
+        for u in urls:   # fetched directly: free (previously Exa contents)
+            _, txt = page_text(ctx.client, u)
+            if txt:
+                pages.append({"url": u, "text": txt})
         out = []
         for page in pages:
             text = page.get("text") or ""
@@ -87,6 +99,44 @@ class PublishedPageFinder(Finder):
                 if page.get("url") in own_site or name_matches(e, person["display_name"]):
                     out.append({"email": e, "source": self.name, "url": page.get("url")})
         return out
+
+
+class FounderDomainFinder(Finder):
+    """Founders: find the company's domain (free), read its own pages for a published address,
+    otherwise list the usual address patterns as guesses that a verifier must confirm."""
+    name = "pattern_guess"
+
+    def find(self, ctx, person, run) -> list[dict]:
+        from . import domains
+
+        if person["segment"] != "founder" or not person["primary_employer"]:
+            return []
+        dom = person["employer_domain"]
+        if not dom:
+            ev = [r["evidence_text"] for r in ctx.con.execute(
+                "SELECT evidence_text FROM signals WHERE person_id=? AND evidence_text IS NOT NULL",
+                (person["person_id"],))]
+            for r in ctx.con.execute(   # the headline of the article they were found in says what the company does
+                    "SELECT sr.payload FROM source_records sr JOIN signals s ON s.url=sr.source_native_id "
+                    "WHERE s.person_id=? AND sr.source='exa_news'", (person["person_id"],)):
+                import json as _json
+                payload = _json.loads(r["payload"]) or {}
+                ev += [payload.get("title") or "", payload.get("excerpt") or ""]
+            dom = domains.company_domain(ctx.client, person["primary_employer"], domains.keywords_from(ev))
+            if not dom:
+                return []
+            db.touch_person(ctx.con, person["person_id"], employer_domain=dom)
+        out = []
+        for path in domains.EXTRA_PAGES:
+            _, text = domains.page_text(ctx.client, f"https://{dom}{path}")
+            for e in emails_in(text):
+                if e.endswith("@" + dom) and (name_matches(e, person["display_name"])
+                                              or first_name_at(e, person["display_name"], dom)):
+                    out.append({"email": e, "source": "published_page", "url": f"https://{dom}{path}"})
+        if out:
+            return out
+        return [{"email": e, "source": self.name, "url": f"https://{dom}"}
+                for e in domains.pattern_candidates(person["display_name"], dom)]
 
 
 class HunterFinder(Finder):
@@ -149,7 +199,7 @@ class IcypeasFinder(Finder):
 
 GROUP_ORDER = {
     "engineer": ["published_page", "exa_websets"],
-    "founder": ["published_page", "exa_websets", "hunter", "prospeo", "icypeas"],
+    "founder": ["published_page", "pattern_guess", "exa_websets", "hunter", "prospeo", "icypeas"],
     "researcher": ["published_page", "hunter", "prospeo"],
     "creator": ["published_page"],
 }
@@ -161,6 +211,8 @@ def available(ctx) -> dict[str, Finder]:
     out: dict[str, Finder] = {}
     if "published_page" in enabled:
         out["published_page"] = PublishedPageFinder()
+    if "pattern_guess" in enabled:
+        out["pattern_guess"] = FounderDomainFinder()
     for name, cls, key in (("hunter", HunterFinder, "HUNTER_API_KEY"), ("prospeo", ProspeoFinder, "PROSPEO_API_KEY"),
                            ("icypeas", IcypeasFinder, "ICYPEAS_API_KEY")):
         if name in enabled and s.secret(key):

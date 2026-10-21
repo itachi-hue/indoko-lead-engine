@@ -1,7 +1,7 @@
 import pytest
 
 from lead_engine import db, suppression
-from lead_engine.emails import find, finders, verify
+from lead_engine.emails import find, finders, policy, verify
 from lead_engine.runtime import Run
 
 from conftest import make_person
@@ -64,21 +64,21 @@ def test_name_matching():
     assert not finders.name_matches("bob@x.com", "Ada Lovelace")
 
 
-def test_published_page_finder(ctx):
+def test_published_page_finder(ctx, router):
     pid = person(ctx.con, "engineer")
     db.add_signal(ctx.con, pid, "personal_site", "https://ada.dev", "https://ada.dev")
     ctx.con.commit()
-    ctx.exa = FakeExaPages([{"url": "https://ada.dev",
-                             "text": "Ada Lovelace, engineer at Google. Write to me: hi [at] ada [dot] dev. info@ada.dev"}])
+    router.add("GET", r"^https://ada\.dev", "<html><title>Ada</title><p>Ada Lovelace, engineer at Google. "
+               "Write to me: hi [at] ada [dot] dev. info@ada.dev</p></html>")
     with Run(ctx.con, "x") as r:
         out = finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r)
     assert [c["email"] for c in out] == ["hi@ada.dev"]          # role address dropped
 
 
-def test_published_page_requires_page_about_person(ctx):
+def test_published_page_requires_page_about_person(ctx, router):
     pid = person(ctx.con, "engineer")
     db.add_signal(ctx.con, pid, "personal_site", "https://x.dev", "https://x.dev")
-    ctx.exa = FakeExaPages([{"url": "https://x.dev", "text": "Bob Smith's site. bob@x.dev"}])
+    router.add("GET", r"^https://x\.dev", "<p>Bob Smith's site at Google. bob@x.dev</p>")
     with Run(ctx.con, "x") as r:
         assert finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r) == []
 
@@ -161,11 +161,11 @@ def test_verifier_mapping(router, ctx, cls, payload, expected):
 
 
 
-def test_engineer_page_must_name_employer(ctx):
+def test_engineer_page_must_name_employer(ctx, router):
     pid = person(ctx.con, "engineer", employer="Google")
     db.add_signal(ctx.con, pid, "personal_site", "https://chan.dev", "https://chan.dev")
     ctx.con.commit()
-    ctx.exa = FakeExaPages([{"url": "https://chan.dev", "text": "Ada Lovelace, designer in Berlin. ada@chan.dev"}])
+    router.add("GET", r"^https://chan\.dev", "<p>Ada Lovelace, designer in Berlin. ada@chan.dev</p>")
     with Run(ctx.con, "x") as r:
         assert finders.PublishedPageFinder().find(ctx, db.get_person(ctx.con, pid), r) == []
 
@@ -184,3 +184,52 @@ def test_discover_only_marks_nobody_and_reuses_lookups(ctx, monkeypatch):
     with Run(ctx.con, "find-emails") as r:
         res = find.find_emails(ctx, r, "founder", 10, 5.0)
     assert res["found"] == 1 and hun.calls == 1 and v.calls == ["ada@northwind.ai"]   # lookup not repeated
+
+
+
+def test_founder_domain_and_patterns(ctx, router):
+    from lead_engine.emails import domains
+    pid = person(ctx.con, "founder", name="Justin Mast", employer="Electric Plant Company", employer_domain=None)
+    db.add_signal(ctx.con, pid, "funding", "1", "u", evidence_text="Bombadil plant signals model, Bombadil sensors",
+                  evidence_date="2026-10-20", url="https://news/x")
+    ctx.con.commit()
+    router.add("GET", r"^https://electricplant\.co/?$", "<title>Electric Plant</title><p>Electric Plant: Bombadil reads plant signals from sensors</p>")
+    router.add("GET", r"^https://electricplantcompany\.com", "<title>Parked domain</title>")
+    with Run(ctx.con, "x") as r:
+        out = finders.FounderDomainFinder().find(ctx, db.get_person(ctx.con, pid), r)
+    assert db.get_person(ctx.con, pid)["employer_domain"] == "electricplant.co"
+    assert [c["email"] for c in out][:3] == ["justin@electricplant.co", "justin.mast@electricplant.co",
+                                             "justinmast@electricplant.co"]
+    assert {c["source"] for c in out} == {"pattern_guess"}
+
+
+def test_founder_published_address_preferred(ctx, router):
+    pid = person(ctx.con, "founder", name="Ada Lovelace", employer="Northwind", employer_domain="northwind.ai")
+    router.add("GET", r"^https://northwind\.ai/team", '<a href="mailto:ada@northwind.ai">Ada Lovelace, CEO</a>')
+    with Run(ctx.con, "x") as r:
+        out = finders.FounderDomainFinder().find(ctx, db.get_person(ctx.con, pid), r)
+    assert out == [{"email": "ada@northwind.ai", "source": "published_page", "url": "https://northwind.ai/team"}]
+
+
+def test_guesses_need_a_definite_mailbox(ctx):
+    f = db.get_person(ctx.con, person(ctx.con, "founder"))
+    r = db.get_person(ctx.con, person(ctx.con, "researcher", name="Grace Hopper"))
+    assert policy.acceptable(f, "ada@northwind.ai", "pattern_guess", "deliverable")[0]
+    assert not policy.acceptable(f, "ada@northwind.ai", "pattern_guess", "catch_all")[0]
+    assert not policy.acceptable(r, "grace@uni.edu", "pattern_guess", "deliverable")[0]
+
+
+
+def test_patterns_handle_apostrophes():
+    from lead_engine.emails import domains
+    assert domains.pattern_candidates("Justin D’Souza", "x.ai")[:2] == ["justin@x.ai", "justin.dsouza@x.ai"]
+
+
+def test_domain_needs_company_specific_word(ctx, router):
+    from lead_engine.emails import domains
+    router.add("GET", r"^https://kodama\.com/?$", "<title>Kodama | Restaurant</title><p>Kodama sushi forestry</p>")
+    router.add("GET", r"^https://kodama\.ai/?$", "<title>Home</title><p>Kodama: autonomy for logging skidders</p>")
+    router.add("GET", r"^https://getkodama\.com/?$", "<title>Kodama carbon</title><p>Kodama intelligent API</p>")
+    kws = ["kodama", "logging", "skidders", "forestry", "intelligent", "operators"]
+    assert domains.company_domain(ctx.client, "Kodama", kws) == "kodama.ai"
+    assert domains.company_domain(ctx.client, "Kodama", ["intelligent"]) is None      # one shared word is not enough
