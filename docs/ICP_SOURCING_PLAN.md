@@ -205,3 +205,29 @@ at Apple"), 10 results each. Cost about $0.03.
 
 **Caveat:** the sample was small. The rate at scale is probably lower than 65%, but it has a wide margin
 over the 20% gate.
+
+## 13. Spend to date (2026-10-20)
+
+| Item | Usage | Cost |
+|---|---|---|
+| Exa | About 95 results, about $1.60 in total | Karishma's credits |
+| Reoon | About 100 checks | $0 (free plan, ~600 a month) |
+| OpenAlex | About 300 researchers scanned | $0 |
+
+**Breakdown of the Exa results:**
+
+- 30 engineer profiles: 10 sourced, 20 for the M1 test;
+- 20 news articles for founders and creators;
+- about 44 searches for people's public pages, to find emails.
+
+**What we have:** 26 people from the first test, 20 researchers who moved here recently, and 13
+engineers in the M1 test sample.
+
+**Confirmed emails:**
+
+- 7 confirmed mailboxes from the first test, plus 2 that the person published themselves;
+- 2 engineer work addresses, from the switch to work addresses;
+- 3 more researchers, from the move filter.
+
+Most of the Exa spend (~$1.25) was the first sourcing test, which read whole news articles. People
+search costs about $0.0015 per person.
