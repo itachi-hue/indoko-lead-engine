@@ -80,9 +80,9 @@ age_recipient = ""              # age public key (age1...); the private key live
 
 [sourcing]
 people_category = "people"      # Exa category for people search
-# Engineers only from these employers (empty = all). Google, Meta and Amazon are left out: their mail
-# servers accept every address, so a guessed work address can't be confirmed.
-engineer_companies = ["Apple", "Microsoft", "NVIDIA", "Netflix"]
+# Engineers only from these employers (empty = all): the ones whose mail servers confirm mailboxes.
+# 30 of 48 checked (incl. Netflix, Stripe, Databricks, Uber) accept every address, so guesses can't be confirmed.
+engineer_companies = ["Microsoft", "Apple", "NVIDIA", "Intel", "Tesla", "LinkedIn", "Intuit", "eBay", "Cloudflare", "MongoDB", "Figma", "Plaid", "Rippling"]   # from `lead-engine check-domains`, 2026-10-20
 # Moved-to-the-US filter (researchers: OpenAlex affiliation history; engineers: patent addresses).
 # Built from where people worked, never from names. "require" | "prefer" | "off"
 moved_to_us = "require"

@@ -330,6 +330,20 @@ def fetch_articles(ctx, run, group: str, max_articles: int) -> list[dict]:
     return out[:max_articles]
 
 
+def _founder_profile(ctx, run, name: str, company: str) -> dict | None:
+    """The founder's Exa people profile, only if it names them AND lists this company in their history."""
+    category = ctx.settings.get("sourcing.people_category", "people")
+    for r in _search(ctx, run, f"{name} founder {company}", num_results=3, category=category, include_text=True):
+        for ent in r.get("entities") or []:
+            props = ent.get("properties") or {}
+            if ent.get("type") != "person" or not _names_person(name, props.get("name") or ""):
+                continue
+            jobs = " ".join(((j.get("company") or {}).get("name") or "") for j in props.get("workHistory") or [])
+            if company.lower() in jobs.lower():
+                return props
+    return None
+
+
 def _ingest_founder(ctx, run, art: dict, raw: dict, room: int) -> int:
     text = art.get("text") or ""
     rec = extract.verify_founder_record(raw or {}, text)
@@ -342,10 +356,23 @@ def _ingest_founder(ctx, run, art: dict, raw: dict, room: int) -> int:
         (f" in a {rec['round']} round" if rec.get("round") else "")
     added = 0
     for f in rec["founders"][:room]:
+        move, floc = None, loc
+        if mobility.mode(ctx) != "off":
+            props = _founder_profile(ctx, run, f["name"], rec["company"])
+            if props:
+                move = mobility.profile_move(ctx, props, mobility.engineer_within_years(ctx))
+                if floc is None:   # the article didn't say; their own profile's current location does
+                    cur = [j for j in props.get("workHistory") or [] if not (j.get("dates") or {}).get("to")]
+                    floc = us_located((cur[0].get("location") if cur else None) or props.get("location"))
+            if mobility.mode(ctx) == "require" and not move:
+                run.skipped += 1
+                continue
         pid = resolve_person(ctx.con, [("founder_key", _key(f["name"], rec["company"]))], f["name"],
                              segment="founder", group_source="cold", primary_employer=rec["company"],
-                             title=(f.get("title") or "Founder")[:80], us_located=loc,
+                             title=(f.get("title") or "Founder")[:80], us_located=floc,
                              country=rec.get("location"))
+        if move:
+            mobility.record(ctx.con, pid, move, art.get("url") or "")
         db.add_signal(ctx.con, pid, "funding", rec.get("amount") or "", art.get("url"),
                       evidence_text=fact, evidence_date=(art.get("publishedDate") or "")[:10] or None,
                       url=art.get("url"))

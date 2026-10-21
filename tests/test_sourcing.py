@@ -34,6 +34,7 @@ ARTICLE = ("SAN FRANCISCO — Northwind, a San Francisco-based developer tools s
 
 @pytest.fixture
 def sctx(ctx):
+    ctx.settings.data.setdefault("sourcing", {})["moved_to_us"] = "off"   # tests that need it turn it on
     ctx.exa = FakeExa()
     ctx.gemini = FakeGemini()
     return ctx
@@ -106,7 +107,7 @@ def test_source_founders(sctx):
     sctx.gemini.outputs = [{"company": "Northwind", "round": "seed", "amount": "$4M", "location": "San Francisco",
                             "founders": [{"name": "Ada Lovelace", "title": "CEO"},
                                          {"name": "Charles Babbage", "title": "CTO"}]}]
-    sctx.settings.data["sourcing"] = {"queries": {"founder": ["startup raises seed round"]}}
+    sctx.settings.data["sourcing"] = {"queries": {"founder": ["startup raises seed round"]}, "moved_to_us": "off"}
     with Run(sctx.con, "source") as r:
         assert cold.source(sctx, r, "founder", 10, via="exa") == 2
     rows = sctx.con.execute("SELECT * FROM signals WHERE signal_type='funding'").fetchall()
@@ -126,7 +127,7 @@ def test_source_creators(sctx):
                                 "publishedDate": "2026-02-01", "text": text}])
     sctx.gemini.outputs = [{"people": [{"name": "Maya Chen", "discipline": "filmmaker",
                                         "achievement": "won the Grand Jury Prize at Sundance", "location": "Brooklyn"}]}]
-    sctx.settings.data["sourcing"] = {"queries": {"creator": ["filmmaker wins festival award"]}}
+    sctx.settings.data["sourcing"] = {"queries": {"creator": ["filmmaker wins festival award"]}, "moved_to_us": "off"}
     with Run(sctx.con, "source") as r:
         assert cold.source(sctx, r, "creator", 5) == 1
     s = sctx.con.execute("SELECT * FROM signals WHERE signal_type='press'").fetchone()
@@ -277,3 +278,28 @@ def test_source_engineers_requires_move_before_paid_evidence(sctx, router):
     ev = [e["evidence_text"] for e in db.evidence_for(sctx.con, p["person_id"])]
     assert ev == ["Staff Software Engineer at Microsoft since 2019"]          # the move is never evidence
     assert len(sctx.exa.queries) == 1                                         # no evidence searches spent
+
+
+def test_founder_kept_only_with_move_from_own_profile(sctx, router):
+    router.add("GET", r"api.openalex.org/institutions\?search=IIT", {"results": [
+        {"display_name": "Indian Institute of Technology Bombay", "country_code": "IN"}]})
+    sctx.settings.data["sourcing"]["moved_to_us"] = "require"
+    sctx.exa.on(r"raises", [{"title": "Northwind raises $4M", "url": "https://news/nw",
+                             "publishedDate": "2026-09-10T00:00:00Z", "text": ARTICLE}])
+    sctx.exa.on(r"Ada Lovelace founder Northwind", [{"title": "Ada", "url": "https://li/ada", "text": "", "entities": [
+        _entity("Ada Lovelace", "Northwind",
+                [("CEO", "Northwind", "San Francisco, California, United States", "2025-01-01", None)],
+                [("IIT Bombay", "2012")])]}])
+    sctx.exa.on(r"Charles Babbage founder Northwind", [{"title": "Charles", "url": "https://li/cb", "text": "",
+        "entities": [_entity("Charles Babbage", "Northwind",
+                             [("CTO", "Northwind", "San Francisco, California, United States", "2025-01-01", None)],
+                             [])]}])
+    sctx.gemini.outputs = [{"company": "Northwind", "round": "seed", "amount": "$4M", "location": "San Francisco",
+                            "founders": [{"name": "Ada Lovelace", "title": "CEO"},
+                                         {"name": "Charles Babbage", "title": "CTO"}]}]
+    with Run(sctx.con, "source") as r:
+        assert cold.source(sctx, r, "founder", 5, via="exa") == 1
+    p = sctx.con.execute("SELECT * FROM persons").fetchone()
+    assert p["display_name"] == "Ada Lovelace"
+    assert sctx.con.execute("SELECT value FROM signals WHERE signal_type='moved_to_us'").fetchone()[0] == \
+        "IN 2012 -> US 2025"
