@@ -135,7 +135,7 @@ credits unless noted.
 | # | What | Needs | Spend | Gate |
 |---|---|---|---|---|
 | **M1** ✅ | Exa people search on 20 Microsoft and Apple engineers: does it return education history, and what share studied abroad? | – | ~$0.03 | **Passed:** education returned for 20 of 20; 13 of 20 studied or worked abroad first (7 first came to the US in 2018 or later) |
-| **M2** | Check 50 mid-size tech companies for catch-all mail servers; keep the ones that confirm mailboxes | – | ~50 Reoon checks | ≥20 usable companies |
+| **M2** ✅ | Check 50 mid-size tech companies for catch-all mail servers; keep the ones that confirm mailboxes | – | 48 Reoon checks | **12 of 48 confirm** (+ Apple from earlier) = 13 companies. Below the ≥20 gate, but they include the biggest engineering employers. See section 14 |
 | **M3** | Engineer source: Exa people search + education and job-location filter across the M2 companies; 100 engineers end to end | M1 pass ✅ | ~$1 | ≥30 leads from 100 |
 | **M4** | Founders: SEC Form D live; immigrant signal from bios and immigrant-founder fund portfolios; 100 founders end to end | SEC contact email | ~$3–5 | ≥20 leads from 100 |
 | **M5** | Researchers: corresponding-author emails from papers; 200 movers | – | $0 | Email rate ≥35% |
@@ -178,7 +178,7 @@ the levers in order are:
 | SEC contact email | M4 | Waiting on Vivek |
 | PatentsView key (free) | M7 | Waiting on Vivek |
 | Gemini key + Google service account with Sheet access | M8 | Waiting |
-| Reoon paid plan | When monthly checks pass ~600 | Later |
+| Reoon paid plan | **Needed now for any burst:** the free plan is a *daily* allowance (it ran out after ~134 checks on 2026-10-20) | Needed before M3/M4 email checks |
 | Rotate the Reoon and Exa keys (both were pasted in chat) | Security | Not done |
 
 ## 12. M1 results (2026-10-20)
@@ -231,3 +231,25 @@ engineers in the M1 test sample.
 
 Most of the Exa spend (~$1.25) was the first sourcing test, which read whole news articles. People
 search costs about $0.0015 per person.
+
+## 14. M2 results (2026-10-20)
+
+**Method:** `lead-engine check-domains` sends Reoon one made-up address per company. A server that
+rejects it confirms mailboxes; a server that accepts it accepts every address.
+
+| Result | Companies |
+|---|---|
+| **Confirms mailboxes (use)** | Microsoft, NVIDIA, LinkedIn, Tesla, Intel, Intuit, eBay, Cloudflare, MongoDB, Figma, Plaid, Rippling, plus Apple (confirmed real addresses earlier; the made-up address got no answer) |
+| Accepts every address (skip) | Netflix, OpenAI, Stripe, Databricks, Uber, Airbnb, Snowflake, Adobe, AMD, Cisco, IBM, PayPal, Workday, Pinterest, Dropbox, DoorDash, Lyft, Coinbase, Robinhood, Datadog, Twilio, Okta, Atlassian, Palantir, Snap, Roblox, Instacart, Ramp, Anthropic, Scale AI |
+| No answer | Apple (see above), Salesforce, Qualcomm, Oracle, ServiceNow, Zoom |
+| Not checked (Reoon ran out) | Expedia, Zillow, Wayfair, Etsy, Splunk, Broadcom, Samsung, Visa, Block |
+
+**What it means:**
+
+- Only about a quarter of companies can have a guessed work address confirmed.
+- Engineers now come from 13 companies (`sourcing.engineer_companies`).
+- Microsoft, Intel, NVIDIA, Apple and Tesla alone employ tens of thousands of US engineers, so the
+  pool should be large enough. M3 measures how many distinct people Exa returns.
+
+**Reoon:** the free plan is a daily allowance, not 600 to use at once. It hit zero after ~134 checks
+on 2026-10-20. Pilot volume needs the paid plan.
