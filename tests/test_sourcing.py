@@ -352,3 +352,19 @@ def test_funding_headline_rules(sctx, title, ok):
                                            "publishedDate": "2026-08-01", "text": "body"}])
     with Run(sctx.con, "x") as r:
         assert (cold._funding_evidence(sctx, r, company) is not None) == ok
+
+
+@pytest.mark.parametrize("company,title,ok", [
+    ("Grizzly", "Grizzly Discoveries Raised CA$360,000 For More Drilling", False),
+    ("End Close", "Eagl Raises EUR825K to Automate Month-End Close with AI", False),
+    ("Metriport", "Metriport raises $26 million to give clinicians data", True),
+    ("Fin", "Former Citadel employees raise $17 million for Fin", True),
+    ("Index Robotics", "Index Robotics Raises $1M Seed Round", True),
+])
+def test_company_raises_headline(company, title, ok):
+    assert cold._company_raises(company, title) == ok
+
+
+def test_clean_person_name():
+    assert cold._clean_person_name("Julius Bruch, MD, PhD") == "Julius Bruch"
+    assert cold._clean_person_name("Shinhee (Shane) Lee") == "Shinhee Lee"

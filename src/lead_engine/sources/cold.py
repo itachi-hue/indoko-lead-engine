@@ -473,14 +473,43 @@ def _current_founder_job(props: dict) -> dict | None:
     return None
 
 
-def _funding_evidence(ctx, run, company: str) -> dict | None:
-    """A dated news article saying this company raised money (last 18 months)."""
+RAISE_VERB = re.compile(r"^(raises?|raised|secures?|secured|closes?|closed|lands?|landed|bags?|nabs?|"
+                        r"announces?|gets?|wins?)$", re.I)
+
+
+def _company_raises(company: str, title: str) -> bool:
+    """The headline has the company as its own name, directly followed by a raise verb, or "for <company>".
+    'Grizzly Discoveries raised' is not 'Grizzly'; 'automate Month-End Close' is not 'End Close'."""
+    toks = re.findall(r"[A-Za-z0-9]+", title)
+    want = re.sub(r"[^a-z0-9]", "", company.lower())
+    for i in range(len(toks)):
+        for n in (1, 2, 3):
+            if "".join(t.lower() for t in toks[i:i + n]) != want:
+                continue
+            before = toks[i - 1].lower() if i else ""
+            after = toks[i + n] if i + n < len(toks) else ""
+            if RAISE_VERB.match(after) or before == "for":
+                return True
+    return False
+
+
+def _clean_person_name(name: str) -> str:
+    """'Julius Bruch, MD, PhD' -> 'Julius Bruch'; 'Shinhee (Shane) Lee' -> 'Shinhee Lee'."""
+    name = re.sub(r"\([^)]*\)", " ", name.split(",")[0])
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def _funding_evidence(ctx, run, company: str, founder: str = "") -> dict | None:
+    """A dated news article saying this company raised money (last 18 months). With `founder`, the
+    article must also name them (live test: same-name companies and look-alike headlines got through)."""
     for r in _search(ctx, run, f'"{company}" raises funding round', num_results=3, include_text=True,
                      start_published_date=_since(540)):
         title, text = _clean_title(r.get("title")), (r.get("text") or "")[:6000]
         blob = f"{title} {text}"
         squash = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())  # noqa: E731 - "StackAI" == "Stack AI"
         if squash(company) not in squash(title) or not RAISE_HEADLINE.search(title) or HEDGED.search(title):
+            continue
+        if founder and not (_names_person(founder, f"{title} {text}") or _company_raises(company, title)):
             continue
         if any(b in _domain(r.get("url")) for b in NOT_EVIDENCE_DOMAINS):
             continue
@@ -513,10 +542,11 @@ def source_founders_people(ctx, run, limit: int) -> int:
         for r, props in people:
             if added >= limit:
                 break
-            name = (props.get("name") or "").strip()
+            name = _clean_person_name(props.get("name") or "")
             job = _current_founder_job(props)
             url = r.get("url") or ""
-            if not name or not job or len(name.split()) < 2:
+            surname = name.split()[-1] if name else ""
+            if not name or not job or len(name.split()) < 2 or len(surname.strip(".")) < 2 or surname.endswith("."):
                 run.skipped += 1
                 continue
             if db.find_person_by_identifier(ctx.con, "linkedin", url) or db.find_person_by_identifier(ctx.con, "exa", url):
@@ -531,7 +561,7 @@ def source_founders_people(ctx, run, limit: int) -> int:
             if mobility.mode(ctx) == "require" and not move:
                 run.skipped += 1
                 continue
-            funding = _funding_evidence(ctx, run, company)
+            funding = _funding_evidence(ctx, run, company, name)
             if require_funding and not funding:
                 run.skipped += 1          # no confirmed raise: not the achievement profile we want
                 continue
