@@ -4,6 +4,7 @@
 us_only = true
 groups = ["engineer", "founder", "researcher"]   # creators parked: no reliable source yet
 per_group_limit = 100
+draft_only_movers = true       # cold groups: draft only people who passed the moved-to-the-US filter
 
 [gemini]
 model = ""                      # set in M0 after `lead-engine check --live` lists models

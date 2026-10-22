@@ -467,3 +467,45 @@ def test_run_daily_happy_path(world):
     assert main(["run-daily"], ctx=world) == 0
     assert len(world.instantly.added) == 1
     assert world.sheets.row_by_id("CRM", world.con.execute("SELECT person_id FROM drafts").fetchone()["person_id"])
+
+
+def test_draft_only_movers_flag(con):
+    from lead_engine.drafting.drafter import eligible_people
+    from conftest import make_person
+    a = make_person(con, name="Ada Mover", segment="engineer", email="ada@x.io")
+    make_person(con, name="Bob Stay", segment="engineer", email="bob@x.io")
+    db.add_signal(con, a, "moved_to_us", "IN 2014 -> US 2019", "p")
+    for pid, e in con.execute("SELECT person_id, email FROM persons").fetchall():
+        db.add_identifier(con, pid, "email", e)
+        db.touch_person(con, pid, email_status="verified", us_located=1)
+    con.commit()
+    assert len(eligible_people(con, "engineer", 10)) == 2
+    assert [r["display_name"] for r in eligible_people(con, "engineer", 10, require_moved=True)] == ["Ada Mover"]
+
+
+def test_pipeline_runs_what_its_keys_allow(ctx, monkeypatch, capsys):
+    from lead_engine import commands
+    from lead_engine.runtime import Run
+    calls = []
+    for name in ("cmd_source", "cmd_find_emails", "cmd_draft", "cmd_review"):
+        monkeypatch.setattr(commands, name, lambda c, a, r, n=name: calls.append(
+            (n, getattr(a, "group", None), getattr(a, "discover_only", None))) or 0)
+
+    class A:
+        groups, limit, budget, no_draft = ["engineer", "founder"], 5, None, False
+    ctx.settings.data.setdefault("emails", {})["verifier"] = "reoon"
+    ctx.settings.secrets.pop("VERIFIER_API_KEY", None)
+    ctx.settings.secrets.pop("GEMINI_API_KEY", None)
+    with Run(ctx.con, "pipeline") as r:
+        assert commands.cmd_pipeline(ctx, A(), r) == 0
+    assert calls == [("cmd_source", "engineer", None), ("cmd_find_emails", "engineer", True),
+                     ("cmd_source", "founder", None), ("cmd_find_emails", "founder", True)]
+    assert "skipping drafts" in capsys.readouterr().out
+    calls.clear()
+    ctx.settings.secrets.update({"VERIFIER_API_KEY": "k", "GEMINI_API_KEY": "g"})
+    ctx.settings.data.setdefault("sheet", {})["spreadsheet_id"] = "s"
+    with Run(ctx.con, "pipeline") as r:
+        commands.cmd_pipeline(ctx, A(), r)
+    assert [c[0] for c in calls] == ["cmd_source", "cmd_find_emails", "cmd_draft",
+                                     "cmd_source", "cmd_find_emails", "cmd_draft", "cmd_review"]
+    assert calls[1][2] is False

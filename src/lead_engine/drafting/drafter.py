@@ -28,8 +28,9 @@ def first_name(display_name: str | None) -> str:
     return (display_name or "").split()[0] if display_name else ""
 
 
-def eligible_people(con, segment: str, limit: int, us_only: bool = True):
-    """People in a group with a usable email, no active draft, never contacted, not suppressed."""
+def eligible_people(con, segment: str, limit: int, us_only: bool = True, require_moved: bool = False):
+    """People in a group with a usable email, no active draft, never contacted, not suppressed.
+    require_moved: cold groups only draft people who passed the moved-to-the-US filter."""
     rows = con.execute(
         f"""SELECT p.* FROM persons p
             LEFT JOIN scores s ON s.person_id = p.person_id
@@ -50,6 +51,9 @@ def eligible_people(con, segment: str, limit: int, us_only: bool = True):
         if us_only and r["us_located"] != 1:
             continue
         if suppression.is_suppressed(con, r["email"]):
+            continue
+        if require_moved and segment != "warm" and not con.execute(
+                "SELECT 1 FROM signals WHERE person_id=? AND signal_type='moved_to_us'", (r["person_id"],)).fetchone():
             continue
         out.append(r)
         if len(out) >= limit:
@@ -133,7 +137,8 @@ def draft_one(ctx, person, batch_id: str) -> tuple[str, str]:
 def draft_batch(ctx, run, segment: str, limit: int) -> str:
     us_only = bool(ctx.settings.get("pilot.us_only", True))
     batch_id = f"b_{dt.date.today().isoformat()}_{segment}"
-    people = eligible_people(ctx.con, segment, limit, us_only)
+    people = eligible_people(ctx.con, segment, limit, us_only,
+                             require_moved=bool(ctx.settings.get("pilot.draft_only_movers", False)))
     if not footer_text(ctx.settings):
         raise RuntimeError("sender.name and sender.postal_address must be set before drafting")
     for person in people:

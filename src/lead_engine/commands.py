@@ -46,7 +46,8 @@ def cmd_draft(ctx, args, run):
     limit = args.limit or int(ctx.settings.get("pilot.per_group_limit", 100))
     if ctx.dry_run:
         from .drafting.drafter import eligible_people
-        n = len(eligible_people(ctx.con, args.group, limit, bool(ctx.settings.get("pilot.us_only", True))))
+        n = len(eligible_people(ctx.con, args.group, limit, bool(ctx.settings.get("pilot.us_only", True)),
+                                require_moved=bool(ctx.settings.get("pilot.draft_only_movers", False))))
         print(f"[dry-run] {n} people would be drafted for '{args.group}' (Gemini is not called)")
         return 0
     batch = draft_batch(ctx, run, args.group, limit)
@@ -427,3 +428,63 @@ def cmd_check_domains(ctx, args, run):
 @configure("check-domains")
 def _(p):
     p.add_argument("--only", nargs="*", help="company names to check (default: all except Google, Meta, Amazon)")
+
+
+# ---------------- sourcing pipeline (find → emails → drafts → Review tab) ----------------
+@command("pipeline", "For each group: source → find emails → draft → push to the Review tab")
+def cmd_pipeline(ctx, args, run):
+    """Each step is its own recorded run. Steps whose keys aren't set yet are skipped with a note,
+    so the pipeline can run today (sourcing + emails) and grows as keys are added."""
+    from .runtime import Run
+
+    groups = args.groups or list(ctx.settings.get("pilot.groups", ["engineer", "founder", "researcher"]))
+    limit = args.limit or int(ctx.settings.get("pilot.per_group_limit", 100))
+    have_verifier = bool(ctx.settings.get("emails.verifier")) and (
+        bool(ctx.settings.secret("VERIFIER_API_KEY")) or str(ctx.settings.get("emails.verifier")).startswith("reacher"))
+    have_gemini = bool(ctx.settings.secret("GEMINI_API_KEY"))
+    have_sheet = bool(ctx.settings.get("sheet.spreadsheet_id"))
+    plan = []
+    for g in groups:
+        plan.append(("source", cmd_source, {"group": g, "limit": limit, "field": None, "via": None,
+                                            "save_articles": False, "extractions": None, "articles": None,
+                                            "max_articles": None}))
+        if have_verifier:
+            plan.append(("find-emails", cmd_find_emails, {"group": g, "limit": limit * 2, "budget": args.budget,
+                                                          "discover_only": False}))
+        else:
+            plan.append(("find-emails", cmd_find_emails, {"group": g, "limit": limit * 2, "budget": args.budget,
+                                                          "discover_only": True}))
+        if have_gemini and have_verifier and not args.no_draft:
+            plan.append(("draft", cmd_draft, {"group": g, "limit": limit}))
+    if have_gemini and have_sheet and have_verifier and not args.no_draft:
+        plan.append(("review", cmd_review, {"action": "push"}))
+    skipped = []
+    if not have_verifier:
+        skipped.append("email checks (no VERIFIER_API_KEY): candidates are collected, nobody is marked ready")
+    if not have_gemini:
+        skipped.append("drafts (no GEMINI_API_KEY)")
+    if not have_sheet:
+        skipped.append("Review tab (no sheet.spreadsheet_id)")
+    for note in skipped:
+        print(f"skipping {note}")
+        run.note(f"skipped {note}")
+    for name, fn, kw in plan:
+        print(f"--> {name} " + " ".join(f"{k}={v}" for k, v in kw.items() if k in ("group", "limit", "action")))
+        with Run(ctx.con, name) as sub:
+            code = fn(ctx, type("Args", (), kw)(), sub) or 0
+            sub.exit_code = code
+            run.cost_usd += sub.cost_usd
+        if code not in (0, 1):
+            run.note(f"{name} failed with exit code {code}; stopping")
+            return code
+    run.ok += 1
+    print(f"pipeline done; cost ~${run.cost_usd:.2f}")
+    return 0
+
+
+@configure("pipeline")
+def _(p):
+    p.add_argument("--groups", nargs="*", choices=["engineer", "founder", "researcher"])
+    p.add_argument("--limit", type=int, help="people to source per group (default pilot.per_group_limit)")
+    p.add_argument("--budget", type=float, help="email-finding dollars per group")
+    p.add_argument("--no-draft", action="store_true", help="stop after emails")
