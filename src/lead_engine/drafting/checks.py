@@ -46,6 +46,19 @@ DEMONYMS = {
     "hispanic", "european", "arab", "persian", "taiwanese", "singaporean", "sri lankan", "nepali",
 }
 
+# Countries: a draft must never say where someone is from or used to live ("your years in India").
+# Matched as whole words; a country inside a cited organisation name would be a false alarm, which
+# costs a regeneration, never a risky send.
+COUNTRIES = {
+    "india", "china", "korea", "japan", "vietnam", "philippines", "pakistan", "bangladesh", "nigeria", "ghana",
+    "kenya", "brazil", "mexico", "colombia", "argentina", "russia", "ukraine", "iran", "israel", "turkey",
+    "egypt", "germany", "france", "italy", "spain", "britain", "england", "ireland", "canada", "australia",
+    "taiwan", "singapore", "sri lanka", "nepal", "romania", "belarus", "poland", "greece", "portugal",
+    "netherlands", "belgium", "sweden", "switzerland", "hong kong", "malaysia", "indonesia", "thailand",
+    "lebanon", "jordan", "saudi arabia", "uae", "chile", "peru", "venezuela", "ethiopia", "south africa",
+    "abroad", "overseas", "back home", "your home",
+}
+
 BANNED_PHRASES = [
     "hope this email finds you", "hope you're doing well", "hope you are doing well", "hope you're well",
     "i came across your profile", "came across your profile", "reaching out", "touch base",
@@ -147,6 +160,9 @@ def check_no_sensitive(texts: list[str]) -> tuple[bool, str]:
         hits = sorted(d for d in DEMONYMS if re.search(rf"\b{re.escape(d)}\b", low))
         if hits:
             return False, f"nationality or ethnicity word: '{hits[0]}'"
+        places = sorted(c for c in COUNTRIES if re.search(rf"\b{re.escape(c)}\b", low))
+        if places:
+            return False, f"mentions where someone is from: '{places[0]}'"
     return True, ""
 
 

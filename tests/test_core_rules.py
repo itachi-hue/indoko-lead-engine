@@ -238,3 +238,14 @@ def test_foreign_domains_rejected():
         assert policy.foreign_domain(e), e
     for e in ("a@kodama.ai", "b@stripe.io", "c@ucdavis.edu", "d@noaa.gov", "e@electricplant.co", "f@gmail.com"):
         assert not policy.foreign_domain(e), e
+
+
+@pytest.mark.parametrize("text,ok", [
+    ("Your work on Siri's on-device models caught my eye.", True),
+    ("After your years in India, scaling infra at Apple must feel different.", False),
+    ("Moving from abroad to lead a team at Microsoft is a big step.", False),
+    ("Since you came over from Russia, ...", False),
+])
+def test_drafts_never_mention_origin(text, ok):
+    from lead_engine.drafting import checks
+    assert checks.check_no_sensitive([text])[0] == ok

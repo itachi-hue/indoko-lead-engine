@@ -7,7 +7,7 @@ per_group_limit = 100
 
 [gemini]
 model = ""                      # set in M0 after `lead-engine check --live` lists models
-prompt_version = "v1"
+prompt_version = "v2"
 max_regenerations = 1
 
 [emails]
