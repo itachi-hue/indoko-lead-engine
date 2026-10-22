@@ -42,19 +42,66 @@ uv run lead-engine review push
 uv run lead-engine run-daily   # events -> review pull -> send -> CRM
 ```
 
-## Cold groups (M2–M4)
+## Cold groups: immigrant engineers, founders, researchers
+
+The plan behind this section is [ICP_SOURCING_PLAN.md](ICP_SOURCING_PLAN.md).
+
+**One command does it all.** For each group, `pipeline` runs:
+
+1. Find people who moved to the US recently.
+2. Find their email and check it.
+3. Draft the emails.
+4. Push the drafts to the Review tab.
 
 ```bash
-uv run lead-engine source --group engineer --limit 100
-uv run lead-engine source --group founder --limit 100
-uv run lead-engine source --group researcher --limit 100 --field computer-science
-uv run lead-engine source --group creator --limit 100
-uv run lead-engine score
-uv run lead-engine find-emails --group founder --budget 5
-uv run lead-engine draft --group founder
-uv run lead-engine review push
-uv run lead-engine linkedin   # engineers with no personal email -> LinkedIn tab
+caffeinate -i uv run lead-engine pipeline --limit 50          # all groups in pilot.groups
+caffeinate -i uv run lead-engine pipeline --groups founder --limit 20 --no-draft
 ```
+
+`caffeinate -i` keeps the Mac awake while it runs.
+
+**Steps whose keys aren't set are skipped, with a note:**
+
+| Missing | What happens |
+|---|---|
+| Verifier key | Email candidates are collected, but nobody is marked ready to email |
+| Gemini key | No drafts |
+| Sheet ID | No Review-tab push |
+
+**Sources per group** (`[sourcing]` in `config.toml`):
+
+| Group | Source | Immigrant signal | Cost |
+|---|---|---|---|
+| Engineers | `engineer_source = "exa"`: Exa people search across `engineer_companies` (only companies whose mail servers confirm mailboxes; refresh with `lead-engine check-domains`) | First school or job abroad, first US year within 15 years | ~$0.005 per engineer |
+| Founders | `founder_source = "exa_people"`: Exa people search for current US founders, then a news headline confirming a raise in the last 18 months | Same | ~$0.02 per founder |
+| Researchers | OpenAlex | Institution history (started abroad, US within 10 years); no government institutions | Free |
+
+**Settings:**
+
+- `moved_to_us = "require"`: only people who moved here are added.
+- `pilot.draft_only_movers = true`: only they get drafts.
+- The move is stored for targeting and never appears in a draft. The draft checks reject any country
+  name.
+
+**Running steps by hand:**
+
+```bash
+uv run lead-engine source --group engineer --limit 50
+uv run lead-engine source --group founder --limit 20
+uv run lead-engine source --group researcher --limit 50
+uv run lead-engine find-emails --group engineer --budget 5
+uv run lead-engine draft --group engineer
+uv run lead-engine review push
+uv run lead-engine check-domains --only Expedia Zillow   # test new companies' mail servers (1 check each)
+```
+
+**Keys:**
+
+- **Verifier (Reoon):** the free plan runs out after a burst, so a run of 100+ people needs the paid plan.
+- **OpenAlex:** set `OPENALEX_API_KEY` (free at openalex.org). Anonymous requests got blocked for about
+  two hours after a day of testing.
+- **If a service blocks for more than 5 minutes,** the run fails that call immediately instead of
+  waiting. School countries then come from the school's name.
 
 ## Every day
 
