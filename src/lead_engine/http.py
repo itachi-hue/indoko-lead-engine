@@ -22,6 +22,16 @@ class HTTPError(Exception):
         self.body = body
 
 
+LONG_BLOCK_SECONDS = 300
+
+
+def _long_block(resp: httpx.Response) -> bool:
+    try:
+        return float(resp.headers.get("Retry-After", "0")) > LONG_BLOCK_SECONDS
+    except ValueError:
+        return False
+
+
 def _retry_after(resp: httpx.Response, attempt: int) -> float:
     ra = resp.headers.get("Retry-After")
     if ra:
@@ -52,6 +62,9 @@ def request(client: httpx.Client, method: str, url: str, *, sleep: Callable[[flo
             sleep(min(2 ** attempt, 60))
             continue
         if resp.status_code in RETRY_STATUSES and attempt < retries:
+            if _long_block(resp):   # e.g. a daily quota: waiting hours inside a run helps nobody; fail now
+                raise HTTPError(resp.status_code, f"blocked for {resp.headers.get('Retry-After')}s",
+                                resp.text[:500])
             sleep(_retry_after(resp, attempt))
             continue
         if resp.status_code >= 400:

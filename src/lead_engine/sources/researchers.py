@@ -24,8 +24,8 @@ FIELDS = {
 
 
 def _mailto(settings) -> str:
-    m = settings.secret("OPENALEX_MAILTO")
-    return f"&mailto={urllib.parse.quote(m)}" if m else ""
+    from .mobility import _openalex_auth
+    return _openalex_auth(settings)
 
 
 def search_authors(ctx, limit: int, field: str | None = None, min_h: int = 8, max_h: int = 45,

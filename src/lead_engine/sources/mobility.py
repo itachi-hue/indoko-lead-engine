@@ -80,13 +80,45 @@ def _school_cached(ctx, key: str):
     return (json.loads(row["payload"]) or {}) if row else None
 
 
-def _school_fetch(client, name: str) -> dict:
+# Set when OpenAlex refuses us for a long time (quota): school lookups stop for the rest of the process
+# and the country is read from the school's name instead.
+_OPENALEX_BLOCKED = {"on": False}
+
+
+def _openalex_auth(settings) -> str:
+    import urllib.parse
+
+    key, mailto = settings.secret("OPENALEX_API_KEY"), settings.secret("OPENALEX_MAILTO")
+    return (f"&api_key={urllib.parse.quote(key)}" if key else "") + (f"&mailto={urllib.parse.quote(mailto)}" if mailto else "")
+
+
+def school_country_from_name(name: str) -> str | None:
+    """Fallback: 'Technical University of Cluj-Napoca' -> abroad; 'University of Texas' -> US."""
+    import re
+
+    from .warm import NON_US_HINTS, us_located
+
+    low = name.lower()
+    if any(re.search(rf"\b{re.escape(h)}\b", low) for h in NON_US_HINTS if len(h) > 3):
+        return "abroad"
+    where = us_located(name)
+    return None if where is None else ("US" if where else "abroad")
+
+
+def _school_fetch(client, name: str, auth: str = "") -> dict:
     import urllib.parse
 
     from .. import http
 
-    res = http.get_json(client, "https://api.openalex.org/institutions?search="
-                        + urllib.parse.quote(name) + "&per_page=1").get("results") or []
+    if _OPENALEX_BLOCKED["on"]:
+        raise http.HTTPError(429, "OpenAlex quota reached earlier in this run")
+    try:
+        res = http.get_json(client, "https://api.openalex.org/institutions?search="
+                            + urllib.parse.quote(name) + "&per_page=1" + auth).get("results") or []
+    except http.HTTPError as exc:
+        if exc.status == 429:
+            _OPENALEX_BLOCKED["on"] = True
+        raise
     return {"query": name, "country_code": res[0].get("country_code") if res else None,
             "matched": res[0].get("display_name") if res else None}
 
@@ -102,9 +134,9 @@ def school_country(ctx, name: str) -> str | None:
     if hit is not None:
         return hit.get("country_code")
     try:
-        rec = _school_fetch(ctx.client, name)
+        rec = _school_fetch(ctx.client, name, _openalex_auth(ctx.settings))
     except http.HTTPError:
-        return None              # unknown; not cached so a later run can retry
+        return school_country_from_name(name)   # not cached, so a later run can do the real lookup
     db.upsert_source_record(ctx.con, "openalex_institution", key, "institution", rec)
     return rec["country_code"]
 
@@ -121,7 +153,11 @@ def prefetch_schools(ctx, profiles: list[dict], workers: int = 8) -> None:
                 names[nm.lower()] = nm
     if not names:
         return
-    results = http.pmap(lambda nm: _school_fetch(ctx.client, nm), list(names.values()), workers)
+    if _OPENALEX_BLOCKED["on"]:
+        return
+    auth = _openalex_auth(ctx.settings)
+    workers = workers if auth else 2   # anonymous requests: stay gentle
+    results = http.pmap(lambda nm: _school_fetch(ctx.client, nm, auth), list(names.values()), workers)
     for key, rec in zip(names, results):
         if not isinstance(rec, Exception):
             db.upsert_source_record(ctx.con, "openalex_institution", key, "institution", rec)

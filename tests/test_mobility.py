@@ -68,3 +68,17 @@ def test_patents_require_mover(ctx, router):
     with Run(ctx.con, "source") as r:
         assert patents.source(ctx, r, 5) == 1
     assert ctx.con.execute("SELECT display_name FROM persons").fetchone()[0] == "Priya Rao"
+
+
+def test_long_quota_block_fails_fast_and_schools_fall_back(ctx, router):
+    from lead_engine import http as h
+    mobility._OPENALEX_BLOCKED["on"] = False
+    slept = []
+    router.add("GET", r"api.openalex.org/institutions", handler=lambda req: httpx.Response(
+        429, headers={"Retry-After": "6260"}, json={}))
+    assert mobility.school_country(ctx, "Technical University of Cluj-Napoca") == "abroad"   # from the name
+    assert mobility._OPENALEX_BLOCKED["on"] is True
+    assert len(router.calls_to("institutions")) == 1                     # no retries, no hour-long wait
+    assert mobility.school_country(ctx, "University of Texas at Austin") == "US"
+    assert len(router.calls_to("institutions")) == 1                     # breaker: not called again
+    mobility._OPENALEX_BLOCKED["on"] = False
