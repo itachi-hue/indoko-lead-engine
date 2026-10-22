@@ -280,3 +280,31 @@ def test_paper_email_from_europe_pmc(ctx, router):
     assert [c["email"] for c in got] == ["sehee.jeong@nyu.edu"]          # a co-author's address is not theirs
     assert got[0]["source"] == "published_page" and "PMC111" in got[0]["url"]
     assert "0000-0001-2345-6789" in str(router.calls_to("europepmc")[0].url)
+
+
+@pytest.mark.parametrize("workers", [1, 8])
+def test_parallel_checks_match_sequential(ctx, monkeypatch, workers):
+    ctx.settings.data.setdefault("emails", {})["verify_workers"] = workers
+    for name in ("Ada Lovelace", "Grace Hopper", "Alan Turing"):
+        person(ctx.con, "founder", name=name, employer_domain="northwind.ai")
+    ctx.con.commit()
+    v = StubVerifier({"ada@northwind.ai": "undeliverable", "grace@northwind.ai": "catch_all",
+                      "alan@northwind.ai": "undeliverable", "alan.turing@northwind.ai": "undeliverable"})
+
+    class Guess:
+        name, cost_usd = "pattern_guess", 0.0
+
+        def find(self, c, p, r):
+            first, last = p["display_name"].lower().split()
+            return [{"email": e, "source": "pattern_guess"} for e in
+                    (f"{first}@northwind.ai", f"{first}.{last}@northwind.ai", f"{first[0]}{last}@northwind.ai")]
+    monkeypatch.setattr(verify, "build", lambda c: v)
+    monkeypatch.setattr(finders, "available", lambda c: {"pattern_guess": Guess()})
+    with Run(ctx.con, "find-emails") as r:
+        res = find.find_emails(ctx, r, "founder", 10, 1.0)
+    emails = {row["display_name"]: row["email"] for row in ctx.con.execute("SELECT display_name, email FROM persons")}
+    assert emails == {"Ada Lovelace": "ada.lovelace@northwind.ai", "Grace Hopper": None,
+                      "Alan Turing": "aturing@northwind.ai"}
+    assert res["found"] == 2 and sorted(v.calls) == sorted([
+        "ada@northwind.ai", "ada.lovelace@northwind.ai", "grace@northwind.ai",            # catch-all: stop
+        "alan@northwind.ai", "alan.turing@northwind.ai", "aturing@northwind.ai"])

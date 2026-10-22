@@ -66,3 +66,21 @@ def get_json(client: httpx.Client, url: str, **kwargs):
 
 def post_json(client: httpx.Client, url: str, payload, **kwargs):
     return request(client, "POST", url, json=payload, **kwargs).json()
+
+
+def pmap(fn, items, workers: int = 8) -> list:
+    """Run fn over items in threads (network calls only; no database work inside fn).
+    Results keep input order; an exception is returned in place of its result, for the caller to handle."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def safe(x):
+        try:
+            return fn(x)
+        except Exception as exc:  # noqa: BLE001 - handed back to the caller
+            return exc
+
+    items = list(items)
+    if workers <= 1 or len(items) <= 1:
+        return [safe(x) for x in items]
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as ex:
+        return list(ex.map(safe, items))

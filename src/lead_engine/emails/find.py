@@ -104,6 +104,45 @@ def find_for_person(ctx, person, run, verifier, avail: dict, budget_left) -> str
     return discovered if verifier is None else None
 
 
+class _NeedCheck(Exception):
+    """Raised instead of calling the verifier, so that checks can be batched and run in parallel."""
+
+    def __init__(self, email: str, person_id: str):
+        super().__init__(email)
+        self.email, self.person_id = email, person_id
+
+
+class _CachedOnly:
+    """Stands in for the verifier during a pass: answers only from the ledger (via _verify), and
+    reports any address that still needs a real check."""
+
+    def __init__(self, real):
+        self.real, self.name, self.cost_usd = real, real.name, real.cost_usd
+        self.person_id = None
+
+    def verify(self, email):
+        raise _NeedCheck(email, self.person_id)
+
+
+def _settle(ctx, run, segment, person, result, avail, counts, discovered, discover_only) -> None:
+    if discover_only:
+        if result:
+            discovered[person["display_name"]] = result
+            counts["found"] += 1
+        else:
+            counts["missed"] += 1
+        return
+    if result:
+        counts["found"] += 1
+        run.ok += 1
+        return
+    counts["missed"] += 1
+    run.skipped += 1
+    tried = [p for p in finders.GROUP_ORDER.get(segment, []) if p in avail]
+    if all(db.ledger_seen(ctx.con, p, finders.request_hash(p, person["person_id"])) for p in tried):
+        db.touch_person(ctx.con, person["person_id"], email_status="none")
+
+
 def find_emails(ctx, run, segment: str, limit: int, budget_usd: float, discover_only: bool = False) -> dict:
     verifier = verify_mod.build(ctx)
     if verifier is None and not discover_only:
@@ -113,33 +152,48 @@ def find_emails(ctx, run, segment: str, limit: int, budget_usd: float, discover_
         verifier = None
     avail = finders.available(ctx)
     start_cost = run.cost_usd
-    found = missed = 0
+    counts = {"found": 0, "missed": 0}
     discovered: dict[str, list] = {}
-    for person in candidates_for(ctx.con, segment, limit):
-        if run.cost_usd - start_cost >= budget_usd:
-            run.note(f"budget cap ${budget_usd:.2f} reached")
+    budget_left = lambda: budget_usd - (run.cost_usd - start_cost)  # noqa: E731
+    workers = int(ctx.settings.get("emails.verify_workers", 8))
+    pending = list(candidates_for(ctx.con, segment, limit))
+    # Passes: each person is walked through exactly the sequential rules, but any address that has
+    # not been checked yet is collected instead; those are checked in parallel, stored in the
+    # ledger, and the next pass continues from there. Same decisions as one-at-a-time, much faster.
+    stand_in = _CachedOnly(verifier) if verifier is not None and workers > 1 else verifier
+    while pending:
+        needs: dict[str, str] = {}
+        waiting = []
+        for person in pending:
+            if budget_left() <= 0:
+                run.note(f"budget cap ${budget_usd:.2f} reached")
+                pending = []
+                break
+            if isinstance(stand_in, _CachedOnly):
+                stand_in.person_id = person["person_id"]
+            try:
+                result = find_for_person(ctx, person, run, stand_in, avail, budget_left)
+            except _NeedCheck as need:
+                needs[need.email] = need.person_id
+                waiting.append(person)
+                continue
+            _settle(ctx, run, segment, person, result, avail, counts, discovered, discover_only)
+            ctx.con.commit()
+        if not needs:
             break
-        result = find_for_person(ctx, person, run, verifier, avail,
-                                 lambda: budget_usd - (run.cost_usd - start_cost))
-        if discover_only:
-            if result:
-                discovered[person["display_name"]] = result
-                found += 1
-            else:
-                missed += 1
-            continue
-        if result:
-            found += 1
-            run.ok += 1
-        else:
-            missed += 1
-            run.skipped += 1
-            tried = [p for p in finders.GROUP_ORDER.get(segment, []) if p in avail]
-            if all(db.ledger_seen(ctx.con, p, finders.request_hash(p, person["person_id"])) for p in tried):
-                db.touch_person(ctx.con, person["person_id"], email_status="none")
+        emails = list(needs)
+        statuses = http.pmap(verifier.verify, emails, workers)
+        for email, status in zip(emails, statuses):
+            if isinstance(status, Exception):
+                ctx.con.commit()
+                raise status   # e.g. out of verifier credits: stop, keeping everything settled so far
+            db.ledger_add(ctx.con, needs[email], verifier.name, db.stable_id("verify", email),
+                          verifier.cost_usd, "hit", {"status": status})
+            run.cost_usd += verifier.cost_usd
         ctx.con.commit()
+        pending = waiting
     ctx.con.commit()
-    out = {"found": found, "missed": missed, "cost_usd": round(run.cost_usd - start_cost, 4)}
+    out = {"found": counts["found"], "missed": counts["missed"], "cost_usd": round(run.cost_usd - start_cost, 4)}
     if discover_only:
         out["unverified_candidates"] = discovered
     return out
