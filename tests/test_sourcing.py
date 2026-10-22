@@ -335,3 +335,20 @@ def test_founders_people_source(sctx, router):
     searched = [q for q, _ in sctx.exa.queries]
     assert any('"Quiet Co" raises' in q for q in searched)                # Ana passed the filter, then had no raise
     assert not any("Nordic AI" in q or "BigCo" in q for q in searched)    # never paid for non-US or non-founders
+
+
+@pytest.mark.parametrize("title,ok", [
+    ("Stack AI raises $16M for enterprises", True),
+    ("Deep Cogito Raises $43M Series A", True),
+    ("Skyfall AI raises undisclosed financing", True),
+    ("Clerk AI expands in Canada, launches Montreal hub", False),
+    ("Algen Biotechnologies Revenue & Market Share 2026", False),
+    ("Bioptic could attract investors after it raises funding", False),
+])
+def test_funding_headline_rules(sctx, title, ok):
+    company = {"Stac": "StackAI", "Deep": "Deep Cogito", "Skyf": "Skyfall AI", "Cler": "Clerk AI",
+               "Alge": "Algen Biotechnologies", "Biop": "Bioptic"}[title[:4]]
+    sctx.exa.on(r"raises funding round", [{"title": title, "url": "https://news.example/x",
+                                           "publishedDate": "2026-08-01", "text": "body"}])
+    with Run(sctx.con, "x") as r:
+        assert (cold._funding_evidence(sctx, r, company) is not None) == ok

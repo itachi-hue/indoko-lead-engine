@@ -457,6 +457,11 @@ FOUNDER_PLACES = ("San Francisco", "New York", "Boston", "Seattle", "Austin", "L
 FOUNDER_QUERIES = [f"co-founder and CEO of a venture-backed {sector} startup in {place}"
                    for place in FOUNDER_PLACES for sector in FOUNDER_SECTORS]
 FUNDING_WORDS = re.compile(r"\b(raises?|raised|funding|seed round|series [a-c]|pre-seed|led by|investors?)\b", re.I)
+# the headline itself must announce a raise (live test: office-expansion news, revenue-estimate pages and
+# "could attract investors" passed a body-text check)
+RAISE_HEADLINE = re.compile(r"\b(raises?|raised|secures?|closes?|lands?|nabs?|bags?)\b.{0,80}"
+                            r"(\$|€|£|\bseed\b|\bseries\b|\bfunding\b|\bround\b|\bfinancing\b|\bmillion\b)", re.I)
+HEDGED = re.compile(r"\b(could|may|might|plans? to|seeks?|seeking|looking to|in talks)\b", re.I)
 MONEY = re.compile(r"\$\s?\d+(?:\.\d+)?\s?(?:m|million|b|billion|k)\b", re.I)
 
 
@@ -474,7 +479,8 @@ def _funding_evidence(ctx, run, company: str) -> dict | None:
                      start_published_date=_since(540)):
         title, text = _clean_title(r.get("title")), (r.get("text") or "")[:6000]
         blob = f"{title} {text}"
-        if company.lower() not in blob.lower() or not FUNDING_WORDS.search(blob):
+        squash = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())  # noqa: E731 - "StackAI" == "Stack AI"
+        if squash(company) not in squash(title) or not RAISE_HEADLINE.search(title) or HEDGED.search(title):
             continue
         if any(b in _domain(r.get("url")) for b in NOT_EVIDENCE_DOMAINS):
             continue
