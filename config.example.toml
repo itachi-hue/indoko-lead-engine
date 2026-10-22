@@ -2,7 +2,7 @@
 
 [pilot]
 us_only = true
-groups = ["engineer", "founder", "researcher", "creator"]
+groups = ["engineer", "founder", "researcher"]   # creators parked: no reliable source yet
 per_group_limit = 100
 
 [gemini]
@@ -86,6 +86,11 @@ engineer_companies = ["Microsoft", "Apple", "NVIDIA", "Intel", "Tesla", "LinkedI
 # Moved-to-the-US filter (researchers: OpenAlex affiliation history; engineers: patent addresses).
 # Built from where people worked, never from names. "require" | "prefer" | "off"
 moved_to_us = "require"
-moved_within_years = 10
+moved_within_years = 10              # researchers
+engineer_moved_within_years = 15     # engineers and founders (green-card backlogs)
+# Which source each group uses. Free: patents (engineers, needs PATENTSVIEW_API_KEY), sec_form_d
+# (founders, needs SEC_CONTACT_EMAIL). Exa: exa (engineers), exa_people (founders).
+engineer_source = "exa"
+founder_source = "exa_people"
 # [sourcing.queries]            # optional overrides of the default search queries per group
 # engineer = ["staff software engineer at Google in the United States"]

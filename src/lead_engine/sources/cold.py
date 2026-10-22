@@ -231,7 +231,10 @@ def source_engineers(ctx, run, limit: int) -> int:
         used += 1
         db.set_cursor(ctx.con, "exa_people", "engineer_query", str((start + used) % len(queries)))
         from_this_query = 0
-        for r in _search(ctx, run, q, num_results=num, category=category, include_text=True):
+        results = _search(ctx, run, q, num_results=num, category=category, include_text=True)
+        mobility.prefetch_schools(ctx, [(e.get("properties") or {}) for r in results
+                                        for e in (r.get("entities") or []) if e.get("type") == "person"])
+        for r in results:
             if added >= limit or from_this_query >= per_query:
                 break
             prof = parse_profile(r)
@@ -446,6 +449,115 @@ def source_creators(ctx, run, limit: int) -> int:
     return ingest_articles(ctx, run, "creator", fetch_articles(ctx, run, "creator", limit * 3), limit)
 
 
+# ---------------- founders via people search (no LLM extraction) ----------------
+FOUNDER_TITLE = re.compile(r"\b(co-?founder|founder|founding ceo)\b", re.I)
+FOUNDER_SECTORS = ("AI", "biotech", "developer tools", "fintech", "climate tech", "robotics", "healthcare",
+                   "cybersecurity", "enterprise software", "deep tech")
+FOUNDER_PLACES = ("San Francisco", "New York", "Boston", "Seattle", "Austin", "Los Angeles", "the United States")
+FOUNDER_QUERIES = [f"co-founder and CEO of a venture-backed {sector} startup in {place}"
+                   for place in FOUNDER_PLACES for sector in FOUNDER_SECTORS]
+FUNDING_WORDS = re.compile(r"\b(raises?|raised|funding|seed round|series [a-c]|pre-seed|led by|investors?)\b", re.I)
+MONEY = re.compile(r"\$\s?\d+(?:\.\d+)?\s?(?:m|million|b|billion|k)\b", re.I)
+
+
+def _current_founder_job(props: dict) -> dict | None:
+    for job in props.get("workHistory") or []:
+        if not (job.get("dates") or {}).get("to") and FOUNDER_TITLE.search(job.get("title") or ""):
+            if ((job.get("company") or {}).get("name") or "").strip():
+                return job
+    return None
+
+
+def _funding_evidence(ctx, run, company: str) -> dict | None:
+    """A dated news article saying this company raised money (last 18 months)."""
+    for r in _search(ctx, run, f'"{company}" raises funding round', num_results=3, include_text=True,
+                     start_published_date=_since(540)):
+        title, text = _clean_title(r.get("title")), (r.get("text") or "")[:6000]
+        blob = f"{title} {text}"
+        if company.lower() not in blob.lower() or not FUNDING_WORDS.search(blob):
+            continue
+        if any(b in _domain(r.get("url")) for b in NOT_EVIDENCE_DOMAINS):
+            continue
+        amount = MONEY.search(title) or MONEY.search(text[:1500])
+        return {"url": r.get("url"), "title": title[:200], "date": (r.get("publishedDate") or "")[:10] or None,
+                "amount": amount.group(0) if amount else "", "excerpt": text[:4000]}
+    return None
+
+
+def source_founders_people(ctx, run, limit: int) -> int:
+    """Founders straight from Exa people search: current founder role at a company, US-based, moved to
+    the US (profile history), and a funding round confirmed by a news article. The filter runs before
+    the paid funding search."""
+    category = ctx.settings.get("sourcing.people_category", "people")
+    queries = list(ctx.settings.get("sourcing.queries.founder_people", []) or FOUNDER_QUERIES)
+    start = int(db.get_cursor(ctx.con, "exa_people", "founder_query") or 0) % len(queries)
+    queries = queries[start:] + queries[:start]
+    num = int(ctx.settings.get("sourcing.founder_results_per_search", 25))
+    require_funding = bool(ctx.settings.get("sourcing.founder_require_funding", True))
+    added = used = 0
+    for q in queries:
+        if added >= limit:
+            break
+        used += 1
+        db.set_cursor(ctx.con, "exa_people", "founder_query", str((start + used) % len(queries)))
+        results = _search(ctx, run, q, num_results=num, category=category, include_text=True)
+        people = [(r, e.get("properties") or {}) for r in results for e in (r.get("entities") or [])
+                  if e.get("type") == "person"]
+        mobility.prefetch_schools(ctx, [p for _, p in people])
+        for r, props in people:
+            if added >= limit:
+                break
+            name = (props.get("name") or "").strip()
+            job = _current_founder_job(props)
+            url = r.get("url") or ""
+            if not name or not job or len(name.split()) < 2:
+                run.skipped += 1
+                continue
+            if db.find_person_by_identifier(ctx.con, "linkedin", url) or db.find_person_by_identifier(ctx.con, "exa", url):
+                continue
+            company = job["company"]["name"].strip()
+            loc = us_located(job.get("location") or props.get("location"))
+            if loc != 1:
+                run.skipped += 1          # founders must be US-based, stated on their own profile
+                continue
+            move = mobility.profile_move(ctx, props, mobility.engineer_within_years(ctx)) \
+                if mobility.mode(ctx) != "off" else None
+            if mobility.mode(ctx) == "require" and not move:
+                run.skipped += 1
+                continue
+            funding = _funding_evidence(ctx, run, company)
+            if require_funding and not funding:
+                run.skipped += 1          # no confirmed raise: not the achievement profile we want
+                continue
+            id_type = "linkedin" if "linkedin.com/in/" in url else "exa"
+            pid = resolve_person(ctx.con, [(id_type, url), ("founder_key", _key(name, company))], name,
+                                 segment="founder", group_source="cold", primary_employer=company,
+                                 title=(job.get("title") or "Founder")[:80], us_located=1,
+                                 country=job.get("location"))
+            if move:
+                mobility.record(ctx.con, pid, move, url)
+            since = (job.get("dates") or {}).get("from")
+            if since:
+                db.add_signal(ctx.con, pid, "role", 1, url,
+                              evidence_text=f"{job.get('title')} at {company} since {str(since)[:4]}",
+                              evidence_date=str(since)[:10], url=url)
+            if funding:
+                fact = f"{company} raised" + (f" {funding['amount']}" if funding["amount"] else " funding") + \
+                    f" ({funding['title'][:120]})"
+                db.add_signal(ctx.con, pid, "funding", funding["amount"], funding["url"], evidence_text=fact,
+                              evidence_date=funding["date"], url=funding["url"])
+                db.upsert_source_record(ctx.con, "exa_news", funding["url"], "article",
+                                        {"title": funding["title"], "url": funding["url"],
+                                         "record": {"company": company}, "excerpt": funding["excerpt"]})
+            db.upsert_source_record(ctx.con, "exa_people", url, "person",
+                                    {"name": name, "company": company, "title": job.get("title"), "url": url})
+            ctx.con.commit()
+            added += 1
+            run.ok += 1
+    ctx.con.commit()
+    return added
+
+
 FREE_DEFAULTS = {"engineer": "patents", "founder": "sec_form_d"}
 
 
@@ -461,6 +573,8 @@ def source(ctx, run, group: str, limit: int, field: str | None = None, via: str 
         if via == "sec_form_d":
             from . import sec_formd
             return sec_formd.source(ctx, run, limit)
+        if via == "exa_people":
+            return source_founders_people(ctx, run, limit)
         return source_founders(ctx, run, limit)
     if group == "creator":
         return source_creators(ctx, run, limit)

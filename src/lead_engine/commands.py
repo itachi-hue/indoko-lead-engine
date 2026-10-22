@@ -265,7 +265,7 @@ def _(p):
     p.add_argument("--group", required=True, choices=["engineer", "founder", "researcher", "creator"])
     p.add_argument("--limit", type=int)
     p.add_argument("--field", help="researchers only: e.g. computer-science, biology, physics")
-    p.add_argument("--via", choices=["patents", "sec_form_d", "exa"],
+    p.add_argument("--via", choices=["patents", "sec_form_d", "exa", "exa_people"],
                    help="override the source (defaults are free: patents for engineers, SEC Form D for founders)")
     p.add_argument("--save-articles", action="store_true",
                    help="founders/creators: fetch news articles and save them for outside extraction")

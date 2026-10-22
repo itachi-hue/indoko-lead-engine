@@ -72,30 +72,60 @@ def _year(value) -> int | None:
     return int(s[:4]) if s[:4].isdigit() else None
 
 
-def school_country(ctx, name: str) -> str | None:
-    """Country code of a school, from OpenAlex institutions (free). Cached in source_records."""
+def _school_cached(ctx, key: str):
     import json
+
+    row = ctx.con.execute("SELECT payload FROM source_records WHERE source='openalex_institution' "
+                          "AND source_native_id=?", (key,)).fetchone()
+    return (json.loads(row["payload"]) or {}) if row else None
+
+
+def _school_fetch(client, name: str) -> dict:
     import urllib.parse
 
+    from .. import http
+
+    res = http.get_json(client, "https://api.openalex.org/institutions?search="
+                        + urllib.parse.quote(name) + "&per_page=1").get("results") or []
+    return {"query": name, "country_code": res[0].get("country_code") if res else None,
+            "matched": res[0].get("display_name") if res else None}
+
+
+def school_country(ctx, name: str) -> str | None:
+    """Country code of a school, from OpenAlex institutions (free). Cached in source_records."""
     from .. import http
 
     key = name.strip().lower()
     if not key:
         return None
-    row = ctx.con.execute("SELECT payload FROM source_records WHERE source='openalex_institution' "
-                          "AND source_native_id=?", (key,)).fetchone()
-    if row:
-        return (json.loads(row["payload"]) or {}).get("country_code")
+    hit = _school_cached(ctx, key)
+    if hit is not None:
+        return hit.get("country_code")
     try:
-        res = http.get_json(ctx.client, "https://api.openalex.org/institutions?search="
-                            + urllib.parse.quote(name) + "&per_page=1").get("results") or []
+        rec = _school_fetch(ctx.client, name)
     except http.HTTPError:
         return None              # unknown; not cached so a later run can retry
-    cc = res[0].get("country_code") if res else None
-    db.upsert_source_record(ctx.con, "openalex_institution", key, "institution",
-                            {"query": name, "country_code": cc,
-                             "matched": res[0].get("display_name") if res else None})
-    return cc
+    db.upsert_source_record(ctx.con, "openalex_institution", key, "institution", rec)
+    return rec["country_code"]
+
+
+def prefetch_schools(ctx, profiles: list[dict], workers: int = 8) -> None:
+    """Look up every uncached school in a batch of profiles in parallel, before the filter runs."""
+    from .. import http
+
+    names = {}
+    for props in profiles:
+        for ed in props.get("educationHistory") or []:
+            nm = ((ed.get("institution") or {}).get("name") or "").strip()
+            if nm and "high school" not in nm.lower() and _school_cached(ctx, nm.lower()) is None:
+                names[nm.lower()] = nm
+    if not names:
+        return
+    results = http.pmap(lambda nm: _school_fetch(ctx.client, nm), list(names.values()), workers)
+    for key, rec in zip(names, results):
+        if not isinstance(rec, Exception):
+            db.upsert_source_record(ctx.con, "openalex_institution", key, "institution", rec)
+    ctx.con.commit()
 
 
 def profile_history(ctx, props: dict) -> list[tuple[int, str, str]]:

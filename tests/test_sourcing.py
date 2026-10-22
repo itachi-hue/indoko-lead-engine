@@ -303,3 +303,35 @@ def test_founder_kept_only_with_move_from_own_profile(sctx, router):
     assert p["display_name"] == "Ada Lovelace"
     assert sctx.con.execute("SELECT value FROM signals WHERE signal_type='moved_to_us'").fetchone()[0] == \
         "IN 2012 -> US 2025"
+
+
+def test_founders_people_source(sctx, router):
+    router.add("GET", r"api.openalex.org/institutions\?search=", {"results": [
+        {"display_name": "Tsinghua University", "country_code": "CN"}]})
+    sctx.settings.data["sourcing"] = {"moved_to_us": "require", "founder_results_per_search": 10}
+    mover = _entity("Wei Zhang", "Lumen AI",
+                    [("Co-founder & CEO", "Lumen AI", "San Francisco, California, United States", "2024-02-01", None),
+                     ("Engineer", "Baidu", "Beijing, China", "2015-01-01", "2018-01-01")],
+                    [("Tsinghua University", "2011")])
+    no_raise = _entity("Ana Lima", "Quiet Co",
+                       [("Founder", "Quiet Co", "Austin, Texas, United States", "2023-01-01", None),
+                        ("Analyst", "Itau", "Sao Paulo, Brazil", "2014-01-01", "2019-01-01")], [])
+    abroad = _entity("Tom Berg", "Nordic AI",
+                     [("Co-founder", "Nordic AI", "Stockholm, Sweden", "2024-01-01", None)], [])
+    employee = _entity("Sam Lee", "BigCo",
+                       [("Staff Engineer", "BigCo", "Seattle, Washington, United States", "2020-01-01", None)], [])
+    sctx.exa.on(r"co-founder and CEO", [{"title": n, "url": f"https://linkedin.com/in/{n}", "text": "",
+                                         "entities": [e]} for n, e in
+                                        (("wei", mover), ("ana", no_raise), ("tom", abroad), ("sam", employee))])
+    sctx.exa.on(r'"Lumen AI" raises', [{"title": "Lumen AI raises $6M seed round led by Acme",
+                                         "url": "https://techcrunch.com/lumen", "publishedDate": "2026-08-01",
+                                         "text": "Lumen AI, a San Francisco startup, raised $6M."}])
+    with Run(sctx.con, "source") as r:
+        assert cold.source(sctx, r, "founder", 5, via="exa_people") == 1
+    p = sctx.con.execute("SELECT * FROM persons").fetchone()
+    assert (p["display_name"], p["primary_employer"], p["us_located"]) == ("Wei Zhang", "Lumen AI", 1)
+    ev = [e["evidence_text"] for e in db.evidence_for(sctx.con, p["person_id"])]
+    assert any("raised $6M" in e for e in ev) and any(e.startswith("Co-founder & CEO at Lumen AI") for e in ev)
+    searched = [q for q, _ in sctx.exa.queries]
+    assert any('"Quiet Co" raises' in q for q in searched)                # Ana passed the filter, then had no raise
+    assert not any("Nordic AI" in q or "BigCo" in q for q in searched)    # never paid for non-US or non-founders
