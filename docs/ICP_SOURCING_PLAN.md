@@ -309,3 +309,34 @@ on 2026-10-20. Pilot volume needs the paid plan.
 - Expected: about 15–20 of the 37 end with a confirmed email.
 
 **Full list:** `~/indoko/leads-2026-10-20.csv` (local only; it contains personal data).
+
+## 16. Sourcing results (2026-10-22)
+
+| Group | Found (moved to the US) | Cost each | Speed | Notes |
+|---|---|---|---|---|
+| Engineers | 20 more (37 in total) across Intuit, Intel, Tesla, LinkedIn, NVIDIA, Microsoft, Apple | ~$0.011 | 20 in 11 s | Search order now cycles companies |
+| Founders | 32, each with a raise confirmed by a headline (e.g. Metriport $26M, Deep Cogito $43M, Plural $7M) | ~$0.05–0.09 | 20 in ~2 min | Most of the cost is funding searches for founders who passed the immigrant filter but had no recent raise |
+| Founder company domains | 24 of 32 found (75%) | $0 | | e.g. metriport.com, e2b.dev, nango.dev |
+
+**Founder funding rules, after three live corrections:**
+
+- The headline must announce a raise, and must not be hedged ("could attract investors").
+- The company match ignores spacing ("StackAI" = "Stack AI").
+- The article must name the founder, **or** the headline must have the company as its own name directly
+  followed by a raise verb.
+  - This rejects "Grizzly Discoveries raised" (a mining company, not Grizzly) and "…automate Month-End
+    Close" (a different company).
+- Credentials and nicknames are stripped from names ("Julius Bruch, MD, PhD" → "Julius Bruch").
+
+**OpenAlex rate limit:**
+
+- After a day of anonymous testing, OpenAlex blocked us for about 1h45m.
+- Long blocks (over 5 minutes) now fail the call immediately; previously each lookup waited 4×120 s
+  and the run stalled.
+- During a block, school countries come from the school's name.
+- Fix for production: a free `OPENALEX_API_KEY`.
+
+**Revised founder cost:** about $0.05–0.09 per founder, so 200 founders a month is ~$10–18 of Exa.
+That's below the $30 in section 6.
+
+**Blocked on Reoon credits:** confirming the emails of 37 engineers and 24 founders.
